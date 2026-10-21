@@ -1,0 +1,66 @@
+# A House Elves elf: what Elf Desk needs to install, set up and run mail-triage.
+name: mail-triage
+title: Mail
+description: Sorts your unread Gmail with Claude. Noise is marked read and labelled; what needs you is listed on its Mail tab.
+main: MailTriage.java
+config: ~/.config/mail-triage/config
+tools: [claude]
+
+reads:
+  - Your unread Gmail inbox, over IMAP with an app password.
+writes:
+  - Marks the noise read and labels it with your noise label.
+  - Marks an email's thread read when you click Done.
+
+settings:
+  - key: GMAIL_ADDRESS
+    label: Gmail account
+    help: The inbox it sorts.
+    kind: email
+  - key: GMAIL_APP_PASSWORD
+    label: Gmail app password
+    help: From myaccount.google.com/apppasswords.
+    kind: secret
+    goes-with: [GMAIL_ADDRESS]
+  - key: MAX_EMAILS
+    label: Emails per run
+    help: The most unread emails one run looks at.
+    kind: int
+    min: 1
+    max: 500
+    default: "50"
+  - key: TRIAGE_LABEL
+    label: Label for noise
+    help: The Gmail label for what it marks read.
+    kind: words
+    default: non-actionable
+
+commands:
+  triage:
+    label: Sort the inbox
+    args: []
+  dry-run:
+    label: Sort without marking anything
+    args: [--dry-run]
+
+dry-run: dry-run
+
+# Its tab (and dashboard card), drawn by ui/mail.js in the desk's sandboxed frame. It reads only the runs it saved and
+# what you marked done.
+tab:
+  page: ui/mail.js
+  card: true
+refresh:
+  command: triage
+  schedule: "Mon..Fri *-*-* 07:00"
+data: [runs, done]
+
+actions:
+  done:
+    label: Mark an email's thread read in Gmail
+    args: [--action=done]
+    ask: false
+    params:
+      account: {kind: email}
+      # A Message-ID: printable, never starting with "-", nothing that could break the IMAP search.
+      messageId: {pattern: "<?[\\x21-\\x7E&&[^-\"\\\\<>()]][\\x21-\\x7E&&[^\"\\\\<>()]]{0,499}>?", max: 502}
