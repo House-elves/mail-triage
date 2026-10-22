@@ -1,4 +1,5 @@
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.mail.*;
@@ -172,6 +173,9 @@ public class EmailTriage {
 
     // ── Classification via Claude ──
 
+    /** What Claude cost during this run, in US dollars (Claude Code's total_cost_usd, at API prices). */
+    static final java.util.concurrent.atomic.DoubleAdder AI_COST = new java.util.concurrent.atomic.DoubleAdder();
+
     static Map<Integer, Decision> classifyBatch(List<EmailInfo> emails, String accountEmail) {
         if (emails.isEmpty()) return Map.of();
 
@@ -216,7 +220,8 @@ public class EmailTriage {
                 + "Respond ONLY with the JSON array, no other text.";
 
         try {
-            ProcessBuilder pb = new ProcessBuilder("claude", "-p", "--model", "sonnet");
+            // JSON: the answer in "result", and what it cost.
+            ProcessBuilder pb = new ProcessBuilder("claude", "-p", "--model", "sonnet", "--output-format", "json");
             pb.redirectErrorStream(false);
             Process process = pb.start();
 
@@ -238,6 +243,10 @@ public class EmailTriage {
                 System.err.println("  Claude classification failed: " + stderr.substring(0, Math.min(300, stderr.length())));
                 return Map.of();
             }
+
+            JsonNode answer = MAPPER.readTree(stdout);
+            if (answer.path("total_cost_usd").isNumber()) AI_COST.add(answer.path("total_cost_usd").asDouble());
+            stdout = answer.path("result").asText("");
 
             // Extract JSON array
             int start = stdout.indexOf('[');

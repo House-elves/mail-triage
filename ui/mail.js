@@ -3,7 +3,7 @@
 import {
     LitElement, html, css, shared, cardStyles, spinner, ago, runTime, took, count, isToday, settingsButton, Ticking, elf,
 } from '/elf-kit/1/kit.js';
-import { runs, run, done } from './runs.js';
+import { runs, run, done, aiThisMonth, usd } from './runs.js';
 
 
 function gmail(account, d) {
@@ -25,6 +25,7 @@ class MailTab extends LitElement {
     static properties = {
         _runs: { state: true },
         _run: { state: true },
+        _aiMonth: { state: true },   // what Claude cost over this month's runs, or null
         _accounts: { state: true },
         _picked: { state: true },
         _doing: { state: true },
@@ -75,11 +76,21 @@ class MailTab extends LitElement {
             this._runs = await runs();
             this._run = await run(this._runs, this._picked);
             await this._marks();
+            this._aiMonth = await aiThisMonth().catch(() => null);
         } catch (e) {
             this._error = e.message;
         } finally {
             this._loading = false;
         }
+    }
+
+    /**
+     * ", AI $0.03 (this month $1.20)": what Claude cost for this run and this month. Claude Code's figure at API
+     * prices: on a subscription, what it would have cost.
+     */
+    _aiCost(r) {
+        if (typeof r.data?.aiCost !== 'number') return '';
+        return html`, <span title="What Claude cost: Claude Code's figure at API prices (on a subscription, not what you're billed)">AI ${usd(r.data.aiCost)}${this._aiMonth != null ? ` (this month ${usd(this._aiMonth)})` : ''}</span>`;
     }
 
     async _marks() {
@@ -203,7 +214,7 @@ class MailTab extends LitElement {
                 <div class="page-top"><div>
                     <h1>Mail</h1>
                     <p class="sub">
-                        ${r ? html`Sorted ${runTime(r.at)}${r.data?.durationMs ? `, took ${took(r.data.durationMs)}` : ''}`
+                        ${r ? html`Sorted ${runTime(r.at)}${r.data?.durationMs ? `, took ${took(r.data.durationMs)}` : ''}${this._aiCost(r)}`
                             : this._loading ? '' : 'Not sorted yet.'}
                     </p>
                 </div>${settingsButton(null, 'Mail settings')}</div>

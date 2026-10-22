@@ -96,6 +96,7 @@ public class MailTriage implements Callable<Integer> {
         runData.put("dryRun", dryRun);
         runData.put("triage", Map.of("accounts", triageAccounts));
         runData.put("durationMs", System.currentTimeMillis() - startTime);
+        runData.put("aiCost", EmailTriage.AI_COST.sum());
         runData.put("status", "success");
         if (dryRun) {
             System.out.println("Dry run: nothing was marked or labelled, and the run isn't saved.");
