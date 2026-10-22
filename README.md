@@ -8,6 +8,8 @@ Each run connects to your Gmail over IMAP, fetches the unread emails (one per th
 
 **Reply** on an email asks Claude for a suggested reply, from the email and the part of its thread everyone you'd reply to already saw. You edit it, tick **Reply all** if it should also go to the email's other recipients, and **Send** sends it from your Gmail (SMTP, with the same app password) in the same thread, quoting the email, once you confirm it in the desk's bar. Who it goes to always comes from the email itself. Nothing else is ever sent.
 
+Suggestions follow **How you write**, a short note at the top of Mail's Settings: write it yourself, or **Learn from my sent emails** has Claude write it from your recent sent emails (your own words only, without what they quote). It's kept in `~/.config/mail-triage/style/`.
+
 Claude reads other people's words here, so every Claude call (triage and replies) runs with no tools (built in or MCP), none of your Claude settings, and in an empty folder.
 
 Threads another elf already owns skip Claude and are marked read directly: GitHub notifications for Dependabot's `org.mvnpm` bumps on `quarkusio/quarkus`, which [mvnpm-dependabot](https://github.com/House-elves/mvnpm-dependabot) checks and comments on.

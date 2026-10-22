@@ -6,6 +6,7 @@
 //SOURCES Config.java
 //SOURCES EmailTriage.java
 //SOURCES Reply.java
+//SOURCES Style.java
 
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -112,6 +113,7 @@ public class MailTriage implements Callable<Integer> {
 
     /** --action done: the Mail tab's Done, its values on stdin (the runner checked them against elf.yaml). */
     private int action(Config config) {
+        if (action.equals("learn-style") || action.equals("save-style")) return style(config);
         if (!List.of("done", "draft-reply", "send-reply").contains(action)) {
             System.err.println("Not an action: " + action);
             return 2;
@@ -141,6 +143,23 @@ public class MailTriage implements Callable<Integer> {
         if (recordDone(account.email(), messageId) != 0) return 1;
         System.out.println("{\"marked\": " + marked + "}");
         return 0;
+    }
+
+    /** learn-style (from your Sent folders) and save-style ({text}): how you write, for suggested replies. */
+    private int style(Config config) {
+        try {
+            ObjectNode out = action.equals("learn-style")
+                    ? Style.learn(Reply.yourEmails(config.getGmailAccounts()), "sent emails")
+                    : Style.save(JSON.readTree(System.in).path("text").asText(""), "you");
+            System.out.println(JSON.writeValueAsString(out));
+            return 0;
+        } catch (IllegalArgumentException e) {
+            System.err.println(e.getMessage());
+            return 2;
+        } catch (Exception e) {
+            System.err.println((action.equals("learn-style") ? "Couldn't learn how you write: " : "Couldn't save it: ") + e.getMessage());
+            return 1;
+        }
     }
 
     /** draft-reply and send-reply: the email is read from Gmail each time, so the reply goes where the email says. */

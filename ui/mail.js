@@ -306,4 +306,12 @@ class MailCard extends LitElement {
 
 customElements.define('mail-tab', MailTab);
 customElements.define('mail-card', MailCard);
-document.body.append(document.createElement(elf.view === 'card' ? 'mail-card' : 'mail-tab'));
+if (elf.view === 'settings') {
+    // How you write, at the top of the desk's Settings pop-up for Mail.
+    await import('./style.js');
+    const style = document.createElement('elf-style');
+    style.what = 'sent emails';
+    document.body.append(style);
+} else {
+    document.body.append(document.createElement(elf.view === 'card' ? 'mail-card' : 'mail-tab'));
+}

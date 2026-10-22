@@ -143,10 +143,57 @@ public class Reply {
                 + "Write only the reply's text, in their voice and the thread's language: a short greeting with the "
                 + "sender's first name, then to the point, then a short sign-off with their first name. Plain text, no "
                 + "subject line, don't quote the email. If they'd need to look something up or decide something, leave "
-                + "a [placeholder] for it rather than inventing an answer.\n\n<thread>\n" + data + "</thread>";
+                + "a [placeholder] for it rather than inventing an answer.\n\n<thread>\n" + data + "</thread>"
+                + Style.forPrompt();
         ObjectNode r = Claude.reply(prompt).put("where", e.where());
         if (!e.others().isEmpty()) r.put("cc", e.cc());
         return r;
+    }
+
+    /**
+     * Your own recent emails, from each account's Sent folder (Gmail names it in your language, so it's found by its
+     * \\Sent flag), for {@link Style#learn}: the newest 30 an account, without what they quote, each cut short.
+     */
+    static List<String> yourEmails(List<Config.GmailAccount> accounts) throws Exception {
+        List<String> out = new ArrayList<>();
+        for (Config.GmailAccount account : accounts) {
+            Properties props = new Properties();
+            props.put("mail.store.protocol", "imaps");
+            Store store = Session.getInstance(props).getStore("imaps");
+            store.connect("imap.gmail.com", account.email(), account.password());
+            try {
+                Folder sent = null;
+                for (Folder f : store.getDefaultFolder().list("*")) {
+                    if (f instanceof org.eclipse.angus.mail.imap.IMAPFolder i && Arrays.asList(i.getAttributes()).contains("\\Sent")) sent = f;
+                }
+                if (sent == null) continue;
+                sent.open(Folder.READ_ONLY);
+                try {
+                    int n = sent.getMessageCount();
+                    for (Message m : n == 0 ? new Message[0] : sent.getMessages(Math.max(1, n - 29), n)) {
+                        String own = ownWords(EmailTriage.getTextBody(m));
+                        if (own.length() >= 20) out.add(own.length() <= 1_500 ? own : own.substring(0, 1_500));
+                    }
+                } finally {
+                    sent.close(false);
+                }
+            } finally {
+                store.close();
+            }
+        }
+        return out;
+    }
+
+    /** What you wrote in an email, without the email it quotes ("On … wrote:", "> …", a forwarded or original message). */
+    static String ownWords(String body) {
+        StringBuilder own = new StringBuilder();
+        for (String line : (body == null ? "" : body).split("\\R")) {
+            String l = line.strip();
+            if (l.matches("(?i)^(on .{5,200} wrote:|-+ ?(original|forwarded) message ?-+|from: .*)$")) break;
+            if (l.startsWith(">")) continue;
+            own.append(line).append('\n');
+        }
+        return own.toString().strip();
     }
 
     /** Sends {@code content} as the reply, in the thread, quoting the email. Returns {sent, where}. */
