@@ -10,7 +10,7 @@ Threads another elf already owns skip Claude and are marked read directly: GitHu
 
 ## Install
 
-From Elf Desk's **Elves** page: **Install** adds the Mail tab, which asks for your Gmail account and an [app password](https://myaccount.google.com/apppasswords). Once they're saved it sorts your inbox for the first time. After that it runs when you click **Refresh** (or the dashboard's **Refresh everything**) and on weekdays at 07:00, which you can change in its settings.
+In Elf Desk, the **+** after the last tab: **Add** it, which adds the Mail tab, which asks for your Gmail account and an [app password](https://myaccount.google.com/apppasswords). Once they're saved it sorts your inbox for the first time. After that it runs when you click **Refresh** (or the dashboard's **Refresh everything**) and on weekdays at 07:00, which you can change in its settings.
 
 The desk reads [`elf.yaml`](elf.yaml): its settings, commands, tab and the one action its tab may ask for (Done).
 
