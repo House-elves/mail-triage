@@ -220,10 +220,8 @@ public class EmailTriage {
                 + "Respond ONLY with the JSON array, no other text.";
 
         try {
-            // JSON: the answer in "result", and what it cost.
-            ProcessBuilder pb = new ProcessBuilder("claude", "-p", "--model", "sonnet", "--output-format", "json");
-            pb.redirectErrorStream(false);
-            Process process = pb.start();
+            // Locked down (the emails are other people's words), JSON: the answer in "result", and what it cost.
+            Process process = Reply.Claude.start();
 
             try (var os = process.getOutputStream()) {
                 os.write(prompt.getBytes(StandardCharsets.UTF_8));
@@ -406,9 +404,9 @@ public class EmailTriage {
         }
     }
 
-    private static final Pattern THRID = Pattern.compile("X-GM-THRID (\\d+)");
+    static final Pattern THRID = Pattern.compile("X-GM-THRID (\\d+)");
 
-    private static List<Long> uidSearch(org.eclipse.angus.mail.imap.protocol.IMAPProtocol p, String criteria)
+    static List<Long> uidSearch(org.eclipse.angus.mail.imap.protocol.IMAPProtocol p, String criteria)
             throws org.eclipse.angus.mail.iap.ProtocolException {
         var responses = p.command("UID SEARCH " + criteria, null);
         var last = responses[responses.length - 1];
@@ -518,7 +516,7 @@ public class EmailTriage {
         return "";
     }
 
-    private static String getTextBody(Message msg) throws Exception {
+    static String getTextBody(Message msg) throws Exception {
         if (msg.isMimeType("text/plain")) {
             Object content = msg.getContent();
             return content != null ? content.toString() : "";

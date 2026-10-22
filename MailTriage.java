@@ -1,9 +1,11 @@
 ///usr/bin/env jbang "$0" "$@" ; exit $?
+//JAVA 21+
 //DEPS info.picocli:picocli:4.7.6
 //DEPS com.fasterxml.jackson.core:jackson-databind:2.17.2
 //DEPS org.eclipse.angus:angus-mail:2.0.3
 //SOURCES Config.java
 //SOURCES EmailTriage.java
+//SOURCES Reply.java
 
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -47,7 +49,8 @@ public class MailTriage implements Callable<Integer> {
     boolean dryRun;
 
     @Option(names = "--action", paramLabel = "NAME", description = "For the Mail tab: done (stdin: {account, messageId}) "
-            + "marks the thread read in Gmail and records it in ~/.config/mail-triage/done. Prints one JSON line.")
+            + "marks the thread read in Gmail and records it in ~/.config/mail-triage/done; draft-reply ({account, "
+            + "messageId}) suggests a reply; send-reply (the same, and content, all, to) sends it. Prints one JSON line.")
     String action;
 
     static final Path RUNS = Config.CONFIG_DIR.resolve("runs");
@@ -109,7 +112,7 @@ public class MailTriage implements Callable<Integer> {
 
     /** --action done: the Mail tab's Done, its values on stdin (the runner checked them against elf.yaml). */
     private int action(Config config) {
-        if (!action.equals("done")) {
+        if (!List.of("done", "draft-reply", "send-reply").contains(action)) {
             System.err.println("Not an action: " + action);
             return 2;
         }
@@ -127,6 +130,7 @@ public class MailTriage implements Callable<Integer> {
             System.err.println("Not a configured Gmail account: " + accountName);
             return 2;
         }
+        if (!action.equals("done")) return reply(account, in);
         int marked;
         try {
             marked = EmailTriage.markThreadRead(account, messageId);
@@ -137,6 +141,31 @@ public class MailTriage implements Callable<Integer> {
         if (recordDone(account.email(), messageId) != 0) return 1;
         System.out.println("{\"marked\": " + marked + "}");
         return 0;
+    }
+
+    /** draft-reply and send-reply: the email is read from Gmail each time, so the reply goes where the email says. */
+    private int reply(Config.GmailAccount account, JsonNode in) {
+        try {
+            Reply.Email e = Reply.find(account, in.path("messageId").asText(""));
+            if (action.equals("draft-reply")) {
+                System.out.println(JSON.writeValueAsString(Reply.draft(e)));
+                return 0;
+            }
+            // The confirm bar named everyone it goes to (Cc too, for Reply all): it must be who the email says now.
+            boolean all = in.path("all").asBoolean(false);
+            if (!e.recipients(all).equalsIgnoreCase(in.path("to").asText(""))) {
+                throw new IllegalArgumentException("This reply would go to " + e.recipients(all) + " now, not "
+                        + in.path("to").asText("") + ". Suggest the reply again.");
+            }
+            System.out.println(JSON.writeValueAsString(Reply.send(e, in.path("content").asText(""), all)));
+            return 0;
+        } catch (IllegalArgumentException e) {
+            System.err.println(e.getMessage());
+            return 2;
+        } catch (Exception e) {
+            System.err.println((action.equals("draft-reply") ? "Couldn't suggest a reply: " : "Couldn't send it: ") + e.getMessage());
+            return 1;
+        }
     }
 
     /** done/mail.json: {account: {Message-ID: when}}, a month of it. */

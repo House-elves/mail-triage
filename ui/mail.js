@@ -4,6 +4,7 @@ import {
     LitElement, html, css, shared, cardStyles, spinner, ago, runTime, took, count, isToday, settingsButton, Ticking, elf,
 } from '/elf-kit/1/kit.js';
 import { runs, run, done, aiThisMonth, usd } from './runs.js';
+import './reply.js';
 
 
 function gmail(account, d) {
@@ -26,6 +27,7 @@ class MailTab extends LitElement {
         _runs: { state: true },
         _run: { state: true },
         _aiMonth: { state: true },   // what Claude cost over this month's runs, or null
+        _replying: { state: true },  // the Message-ID whose reply is open
         _accounts: { state: true },
         _picked: { state: true },
         _doing: { state: true },
@@ -45,6 +47,8 @@ class MailTab extends LitElement {
         li { padding: 11px 18px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 14px; align-items: center; }
         li > .text { display: grid; gap: 3px; min-width: 0; }
         li + li { border-top: 1px solid var(--line); }
+        li .acts { display: flex; gap: 8px; }
+        li elf-reply.reply { grid-column: 1 / -1; }
         .subject { font-weight: 500; overflow-wrap: anywhere; color: var(--ink); text-decoration: none; }
         a.subject:hover { text-decoration: underline; }
         .from, .why { font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }
@@ -173,9 +177,19 @@ class MailTab extends LitElement {
                 <span class="from">${d.from}</span>
                 <span class="why">${d.reason}</span>
             </span>
-            ${canDo && d.messageId ? html`<button class="sm" ?disabled=${this._all?.of}
+            ${canDo && d.messageId ? html`<span class="acts">
+                <button class="sm" aria-expanded=${this._replying === d.messageId ? 'true' : 'false'}
+                    title="Claude suggests a reply for you to edit; nothing is sent until you click Send and confirm it"
+                    @click=${() => { this._replying = this._replying === d.messageId ? null : d.messageId; }}>Reply</button>
+                <button class="sm" ?disabled=${this._all?.of}
                 title="Marks the thread read in Gmail" @click=${() => this._done(account, d)}>
-                ${this._doing === d.messageId ? spinner : ''}Done</button>` : ''}
+                ${this._doing === d.messageId ? spinner : ''}Done</button></span>` : ''}
+            ${this._replying === d.messageId ? html`<elf-reply class="reply"
+                .suggest=${() => elf.act('draft-reply', { account, messageId: d.messageId })}
+                .options=${[{ key: 'all', label: 'Reply all', hint: "Also to the email's other recipients, as Cc" }]}
+                .send=${(draft, text, o) => elf.act('send-reply', { account, messageId: d.messageId, all: !!o.all,
+                    to: draft.where + (o.all && draft.cc ? `, cc ${draft.cc}` : ''), content: text })}
+                @reply-closed=${() => { this._replying = null; }}></elf-reply>` : ''}
         </li>`;
     }
 
