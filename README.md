@@ -10,6 +10,8 @@ Each run connects to your Gmail over IMAP, fetches the unread emails (one per th
 
 Suggestions follow **How you write**, a short note at the top of Mail's Settings: write it yourself, or **Learn from my sent emails** has Claude write it from your recent sent emails (your own words only, without what they quote). It's kept in `~/.config/mail-triage/style/`.
 
+**Find out**: a suggestion leaves what it can't know as [questions in brackets]. When one of them is about code, Find out has an agent look it up in a repo's code and docs and fill it in, showing what it found and where (file and line); Undo puts the suggestion back. The repo is filled in only when it's one of yours (from the GitHub elf's settings); a repo the thread points at is only shown, for you to type in. The agent is the runner's, in its sandbox, after the safety check of the thread, and can only read files (Read, Grep, Glob): no shell, no web, no MCP, so nothing it reads can leave except in its answer, which you read. It needs runner 0.5.6 or later.
+
 Claude reads other people's words here, so every Claude call (triage and replies) runs with no tools (built in or MCP), none of your Claude settings, and in an empty folder.
 
 Threads another elf already owns skip Claude and are marked read directly: GitHub notifications for Dependabot's `org.mvnpm` bumps on `quarkusio/quarkus`, which [mvnpm-dependabot](https://github.com/House-elves/mvnpm-dependabot) checks and comments on.

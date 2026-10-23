@@ -189,6 +189,7 @@ class MailTab extends LitElement {
                 .options=${[{ key: 'all', label: 'Reply all', hint: "Also to the email's other recipients, as Cc" }]}
                 .send=${(draft, text, o) => elf.act('send-reply', { account, messageId: d.messageId, all: !!o.all,
                     to: draft.where + (o.all && draft.cc ? `, cc ${draft.cc}` : ''), content: text })}
+                .findOut=${(text, repo) => elf.act('find-out', { account, messageId: d.messageId, content: text, repo })}
                 @reply-closed=${() => { this._replying = null; }}></elf-reply>` : ''}
         </li>`;
     }

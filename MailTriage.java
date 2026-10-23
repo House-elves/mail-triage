@@ -7,6 +7,7 @@
 //SOURCES EmailTriage.java
 //SOURCES Reply.java
 //SOURCES Style.java
+//SOURCES Research.java
 
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -51,7 +52,8 @@ public class MailTriage implements Callable<Integer> {
 
     @Option(names = "--action", paramLabel = "NAME", description = "For the Mail tab: done (stdin: {account, messageId}) "
             + "marks the thread read in Gmail and records it in ~/.config/mail-triage/done; draft-reply ({account, "
-            + "messageId}) suggests a reply; send-reply (the same, and content, all, to) sends it. Prints one JSON line.")
+            + "messageId}) suggests a reply; send-reply (the same, and content, all, to) sends it; find-out (the same, "
+            + "content and repo) has an agent look up what the reply leaves open. Prints one JSON line.")
     String action;
 
     static final Path RUNS = Config.CONFIG_DIR.resolve("runs");
@@ -114,7 +116,7 @@ public class MailTriage implements Callable<Integer> {
     /** --action done: the Mail tab's Done, its values on stdin (the runner checked them against elf.yaml). */
     private int action(Config config) {
         if (action.equals("learn-style") || action.equals("save-style")) return style(config);
-        if (!List.of("done", "draft-reply", "send-reply").contains(action)) {
+        if (!List.of("done", "draft-reply", "send-reply", "find-out").contains(action)) {
             System.err.println("Not an action: " + action);
             return 2;
         }
@@ -170,6 +172,12 @@ public class MailTriage implements Callable<Integer> {
                 System.out.println(JSON.writeValueAsString(Reply.draft(e)));
                 return 0;
             }
+            if (action.equals("find-out")) {
+                // An agent, which the runner starts: it looks up what the reply leaves open, in the repo you name.
+                System.out.println(JSON.writeValueAsString(Research.request(account.email(), "an email", Reply.json(e),
+                        in.path("content").asText(""), in.path("repo").asText(""))));
+                return 0;
+            }
             // The confirm bar named everyone it goes to (Cc too, for Reply all): it must be who the email says now.
             boolean all = in.path("all").asBoolean(false);
             if (!e.recipients(all).equalsIgnoreCase(in.path("to").asText(""))) {
@@ -182,7 +190,8 @@ public class MailTriage implements Callable<Integer> {
             System.err.println(e.getMessage());
             return 2;
         } catch (Exception e) {
-            System.err.println((action.equals("draft-reply") ? "Couldn't suggest a reply: " : "Couldn't send it: ") + e.getMessage());
+            System.err.println((action.equals("draft-reply") ? "Couldn't suggest a reply: " : action.equals("find-out")
+                    ? "Couldn't start the agent: " : "Couldn't send it: ") + e.getMessage());
             return 1;
         }
     }
