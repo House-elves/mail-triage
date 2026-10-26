@@ -43,7 +43,7 @@ import java.util.stream.Stream;
  * Sorts your unread Gmail with Claude: noise is marked read and labelled, the rest stays unread and is saved with the
  * reason, for its Mail tab on Elf Desk. Sends nothing.
  */
-@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.0.0",
+@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.5.0",
         description = "Sorts your unread Gmail with Claude, for Elf Desk's Mail tab")
 public class MailTriage implements Callable<Integer> {
 
@@ -173,7 +173,8 @@ public class MailTriage implements Callable<Integer> {
                 return 0;
             }
             if (action.equals("find-out")) {
-                // An agent, which the runner starts: it looks up what the reply leaves open, in the repo you name.
+                // An agent, which the runner starts: it looks up what the reply leaves open, in the repo you name (or, for
+                // "mine", the one of yours Claude picks).
                 System.out.println(JSON.writeValueAsString(Research.request(account.email(), "an email", Reply.json(e),
                         in.path("content").asText(""), in.path("repo").asText(""))));
                 return 0;
