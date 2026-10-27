@@ -41,70 +41,55 @@ public class EmailTriage {
 
     // ── Fetch unread emails via IMAP ──
 
-    static List<EmailInfo> fetchUnreadEmails(Config.GmailAccount account, int maxEmails) {
+    /** The account's unread INBOX emails, the newest {@code maxEmails}. Throws when it can't get in. */
+    static List<EmailInfo> fetchUnreadEmails(Config.Account account, int maxEmails) throws Exception {
         List<EmailInfo> emails = new ArrayList<>();
-        Properties props = new Properties();
-        props.put("mail.store.protocol", "imaps");
-        props.put("mail.imaps.host", "imap.gmail.com");
-        props.put("mail.imaps.port", "993");
-
+        Store store = Mailbox.store(account);
         try {
-            Session session = Session.getInstance(props);
-            Store store = session.getStore("imaps");
-            store.connect("imap.gmail.com", account.email(), account.password());
-
             Folder inbox = store.getFolder("INBOX");
             inbox.open(Folder.READ_ONLY);
+            try {
+                Message[] messages = inbox.search(new FlagTerm(new Flags(Flags.Flag.SEEN), false));
+                // Take the last maxEmails (most recent)
+                int start = Math.max(0, messages.length - maxEmails);
+                for (int i = start; i < messages.length; i++) {
+                    try {
+                        Message msg = messages[i];
+                        // Use message number as UID proxy (we'll re-fetch by UID later)
+                        String uid = String.valueOf(msg.getMessageNumber());
 
-            Message[] messages = inbox.search(new FlagTerm(new Flags(Flags.Flag.SEEN), false));
+                        // Try to get real UID if available
+                        if (inbox instanceof UIDFolder uidFolder) {
+                            uid = String.valueOf(uidFolder.getUID(msg));
+                        }
 
-            if (messages.length == 0) {
-                inbox.close(false);
-                store.close();
-                return emails;
-            }
+                        String from = decodeHeader(msg.getHeader("From"));
+                        String to = decodeHeader(msg.getHeader("To"));
+                        String cc = decodeHeader(msg.getHeader("Cc"));
+                        String subject = decodeHeader(msg.getHeader("Subject"));
+                        String date = decodeHeader(msg.getHeader("Date"));
+                        String listId = safeHeader(msg, "List-Id");
+                        String messageId = safeHeader(msg, "Message-ID").strip();
+                        String inReplyTo = safeHeader(msg, "In-Reply-To").strip();
+                        String references = safeHeader(msg, "References").strip();
 
-            // Take the last maxEmails (most recent)
-            int start = Math.max(0, messages.length - maxEmails);
-            for (int i = start; i < messages.length; i++) {
-                try {
-                    Message msg = messages[i];
-                    // Use message number as UID proxy (we'll re-fetch by UID later)
-                    String uid = String.valueOf(msg.getMessageNumber());
+                        String body = getTextBody(msg);
+                        if (body.length() > 800) {
+                            body = body.substring(0, 800) + "...";
+                        }
 
-                    // Try to get real UID if available
-                    if (inbox instanceof UIDFolder uidFolder) {
-                        uid = String.valueOf(uidFolder.getUID(msg));
+                        emails.add(new EmailInfo(uid, from, to, cc, subject, date,
+                                listId, body, messageId, inReplyTo, references));
+                    } catch (Exception e) {
+                        // Skip problematic messages
                     }
-
-                    String from = decodeHeader(msg.getHeader("From"));
-                    String to = decodeHeader(msg.getHeader("To"));
-                    String cc = decodeHeader(msg.getHeader("Cc"));
-                    String subject = decodeHeader(msg.getHeader("Subject"));
-                    String date = decodeHeader(msg.getHeader("Date"));
-                    String listId = safeHeader(msg, "List-Id");
-                    String messageId = safeHeader(msg, "Message-ID").strip();
-                    String inReplyTo = safeHeader(msg, "In-Reply-To").strip();
-                    String references = safeHeader(msg, "References").strip();
-
-                    String body = getTextBody(msg);
-                    if (body.length() > 800) {
-                        body = body.substring(0, 800) + "...";
-                    }
-
-                    emails.add(new EmailInfo(uid, from, to, cc, subject, date,
-                            listId, body, messageId, inReplyTo, references));
-                } catch (Exception e) {
-                    // Skip problematic messages
                 }
+            } finally {
+                inbox.close(false);
             }
-
-            inbox.close(false);
+        } finally {
             store.close();
-        } catch (Exception e) {
-            System.err.println("  Error fetching from " + account.email() + ": " + e.getMessage());
         }
-
         return emails;
     }
 
@@ -293,7 +278,7 @@ public class EmailTriage {
      * connection to server") and nothing was marked. A dropped connection is
      * retried once on a fresh one; the operation is idempotent.
      */
-    static void markAsRead(Config.GmailAccount account, List<String> uids, String label) {
+    static void markAsRead(Config.Account account, List<String> uids, String label) {
         List<Long> all = new ArrayList<>();
         for (String u : uids) {
             try {
@@ -321,14 +306,8 @@ public class EmailTriage {
         System.out.println("  Marked " + marked + " of " + all.size() + " emails as read.");
     }
 
-    private static void markChunk(Config.GmailAccount account, List<Long> uids, String label) throws Exception {
-        Properties props = new Properties();
-        props.put("mail.store.protocol", "imaps");
-        props.put("mail.imaps.host", "imap.gmail.com");
-        props.put("mail.imaps.port", "993");
-
-        Store store = Session.getInstance(props).getStore("imaps");
-        store.connect("imap.gmail.com", account.email(), account.password());
+    private static void markChunk(Config.Account account, List<Long> uids, String label) throws Exception {
+        Store store = Mailbox.store(account);
         try {
             Folder inbox = store.getFolder("INBOX");
             inbox.open(Folder.READ_WRITE);
@@ -339,7 +318,8 @@ public class EmailTriage {
                     p.simpleCommand("UID STORE " + uidSet + " +FLAGS.SILENT (\\Seen)", null);
                     return null;
                 });
-                if (label != null && !label.isEmpty()) {
+                // Labels are Gmail's: Outlook's mail is only marked read.
+                if (label != null && !label.isEmpty() && account.gmail()) {
                     try {
                         imap.doCommand(p -> {
                             p.simpleCommand("UID STORE " + uidSet + " +X-GM-LABELS (\"" + label + "\")", null);
@@ -364,44 +344,83 @@ public class EmailTriage {
 
     /**
      * Marks the INBOX thread of this message read (every unread message in it, as the triage lists a thread by its
-     * first unread message). Gmail finds the message by its Message-ID and the thread by X-GM-THRID.
+     * first unread message). Gmail finds the message by its Message-ID and the thread by X-GM-THRID; elsewhere, the
+     * thread is what {@link #threadRootKey} groups, as the triage did.
      *
      * @return how many messages were marked read (0: it isn't in the INBOX, or the thread was already read)
      */
-    static int markThreadRead(Config.GmailAccount account, String messageId) throws Exception {
+    @SuppressWarnings("unchecked")
+    static int markThreadRead(Config.Account account, String messageId) throws Exception {
         String id = messageId == null ? "" : messageId.strip().replaceAll("^<|>$", "");
         if (!MESSAGE_ID.matcher(id).matches()) throw new IllegalArgumentException("Not a Message-ID: " + messageId);
-        Properties props = new Properties();
-        props.put("mail.store.protocol", "imaps");
-        props.put("mail.imaps.host", "imap.gmail.com");
-        props.put("mail.imaps.port", "993");
-        Store store = Session.getInstance(props).getStore("imaps");
-        store.connect("imap.gmail.com", account.email(), account.password());
+        Store store = Mailbox.store(account);
         try {
             Folder inbox = store.getFolder("INBOX");
             inbox.open(Folder.READ_WRITE);
             try {
                 var imap = (org.eclipse.angus.mail.imap.IMAPFolder) inbox;
-                return (Integer) imap.doCommand(p -> {
+                List<Long> unread = account.gmail() ? (List<Long>) imap.doCommand(p -> {
                     List<Long> found = uidSearch(p, "X-GM-RAW \"rfc822msgid:" + id + "\"");
-                    if (found.isEmpty()) return 0;
+                    if (found.isEmpty()) return found;
                     String thread = null;
                     for (var r : p.command("UID FETCH " + found.get(0) + " (X-GM-THRID)", null)) {
                         Matcher m = THRID.matcher(r.toString());
                         if (m.find()) thread = m.group(1);
                     }
-                    List<Long> unread = thread == null ? found : uidSearch(p, "X-GM-THRID " + thread + " UNSEEN");
-                    if (unread.isEmpty()) return 0;
-                    String set = unread.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
+                    return thread == null ? found : uidSearch(p, "X-GM-THRID " + thread + " UNSEEN");
+                }) : thread(imap, id, true);
+                if (unread.isEmpty()) return 0;
+                String set = unread.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
+                imap.doCommand(p -> {
                     p.simpleCommand("UID STORE " + set + " +FLAGS.SILENT (\\Seen)", null);
-                    return unread.size();
+                    return null;
                 });
+                return unread.size();
             } finally {
                 inbox.close(false);
             }
         } finally {
             store.close();
         }
+    }
+
+    /** How far back in the INBOX a thread is looked for, away from Gmail. */
+    static final int THREAD_LOOKBACK = 500;
+
+    /**
+     * Away from Gmail, the INBOX thread of the email whose Message-ID is {@code id}, by UID: the email itself first, then
+     * the rest of its thread (what {@link #threadRootKey} puts with it), among the newest {@link #THREAD_LOOKBACK}
+     * emails. Their headers are read here rather than searched for on the server, which Outlook does unevenly.
+     * Empty when the email isn't there.
+     */
+    static List<Long> thread(org.eclipse.angus.mail.imap.IMAPFolder inbox, String id, boolean unreadOnly) throws MessagingException {
+        int n = inbox.getMessageCount();
+        if (n == 0) return new ArrayList<>();
+        Message[] recent = inbox.getMessages(Math.max(1, n - THREAD_LOOKBACK + 1), n);
+        FetchProfile fp = new FetchProfile();
+        fp.add(UIDFolder.FetchProfileItem.UID);
+        fp.add(FetchProfile.Item.FLAGS);
+        fp.add("Message-ID");
+        fp.add("References");
+        inbox.fetch(recent, fp);
+        Message target = null;
+        for (Message m : recent) {
+            if (safeHeader(m, "Message-ID").strip().replaceAll("^<|>$", "").equals(id)) target = m;
+        }
+        if (target == null) return new ArrayList<>();
+        String root = rootOf(target);
+        List<Long> uids = new ArrayList<>();
+        if (!unreadOnly || !target.isSet(Flags.Flag.SEEN)) uids.add(inbox.getUID(target));
+        for (Message m : recent) {
+            if (m != target && root.equals(rootOf(m)) && (!unreadOnly || !m.isSet(Flags.Flag.SEEN))) uids.add(inbox.getUID(m));
+        }
+        return uids;
+    }
+
+    /** {@link #threadRootKey} of a message as IMAP has it. */
+    private static String rootOf(Message m) {
+        String refs = safeHeader(m, "References").strip();
+        return !refs.isEmpty() ? refs.split("\\s+")[0] : safeHeader(m, "Message-ID").strip();
     }
 
     static final Pattern THRID = Pattern.compile("X-GM-THRID (\\d+)");
@@ -422,17 +441,25 @@ public class EmailTriage {
 
     // ── Process a single account ──
 
-    record AccountResult(List<TriageResult> results, List<String> markReadUids) {}
+    /** @param error why it couldn't read the account, or null */
+    record AccountResult(List<TriageResult> results, List<String> markReadUids, String error) {}
 
-    static AccountResult processAccount(Config.GmailAccount account, int maxEmails,
+    static AccountResult processAccount(Config.Account account, int maxEmails,
                                          String label, boolean dryRun) {
         String accountEmail = account.email();
         System.out.println("\nProcessing " + accountEmail + "...");
 
-        List<EmailInfo> allEmails = fetchUnreadEmails(account, maxEmails);
+        List<EmailInfo> allEmails;
+        try {
+            allEmails = fetchUnreadEmails(account, maxEmails);
+        } catch (Exception e) {
+            String why = e instanceof AuthenticationFailedException ? "it wouldn't let Mail in (" + e.getMessage() + ")" : e.getMessage();
+            System.err.println("  Couldn't read " + accountEmail + ": " + why);
+            return new AccountResult(List.of(), List.of(), why == null ? e.toString() : why);
+        }
         if (allEmails.isEmpty()) {
             System.out.println("  No unread emails.");
-            return new AccountResult(List.of(), List.of());
+            return new AccountResult(List.of(), List.of(), null);
         }
 
         List<EmailInfo> emails = deduplicateThreads(allEmails);
@@ -479,7 +506,7 @@ public class EmailTriage {
         int marked = markReadUids.size();
 
         if (!markReadUids.isEmpty() && !dryRun) {
-            System.out.println("  Marking " + marked + " emails as read + labeling (keeping " + kept + " unread)...");
+            System.out.println("  Marking " + marked + " emails as read" + (account.gmail() ? " + labeling" : "") + " (keeping " + kept + " unread)...");
             markAsRead(account, markReadUids, label);
         } else if (dryRun) {
             System.out.println("  [DRY RUN] Would mark " + marked + " as read, keep " + kept + " unread:");
@@ -491,7 +518,7 @@ public class EmailTriage {
             System.out.println("  All " + kept + " emails kept unread.");
         }
 
-        return new AccountResult(accountResults, markReadUids);
+        return new AccountResult(accountResults, markReadUids, null);
     }
 
     // ── Helper methods ──
@@ -505,7 +532,7 @@ public class EmailTriage {
         }
     }
 
-    private static String safeHeader(Message msg, String name) {
+    static String safeHeader(Message msg, String name) {
         try {
             String[] vals = msg.getHeader(name);
             if (vals != null && vals.length > 0 && vals[0] != null) {

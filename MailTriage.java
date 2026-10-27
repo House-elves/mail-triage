@@ -4,6 +4,8 @@
 //DEPS com.fasterxml.jackson.core:jackson-databind:2.17.2
 //DEPS org.eclipse.angus:angus-mail:2.0.3
 //SOURCES Config.java
+//SOURCES Mailbox.java
+//SOURCES SignIn.java
 //SOURCES EmailTriage.java
 //SOURCES Reply.java
 //SOURCES Style.java
@@ -40,21 +42,27 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 /**
- * Sorts your unread Gmail with Claude: noise is marked read and labelled, the rest stays unread and is saved with the
- * reason, for its Mail tab on Elf Desk. Sends nothing.
+ * Sorts your unread mail with Claude, from Gmail, Google Workspace and Outlook (Office 365): noise is marked read (and
+ * at Gmail labelled), the rest stays unread and is saved with the reason, for its Mail tab on Elf Desk. Sends nothing
+ * but the replies you send from the tab.
  */
-@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.5.0",
-        description = "Sorts your unread Gmail with Claude, for Elf Desk's Mail tab")
+@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.6.0",
+        description = "Sorts your unread mail with Claude, for Elf Desk's Mail tab")
 public class MailTriage implements Callable<Integer> {
 
     @Option(names = "--dry-run", description = "Decide, but mark and label nothing")
     boolean dryRun;
 
     @Option(names = "--action", paramLabel = "NAME", description = "For the Mail tab: done (stdin: {account, messageId}) "
-            + "marks the thread read in Gmail and records it in ~/.config/mail-triage/done; draft-reply ({account, "
+            + "marks the thread read in its account and records it in ~/.config/mail-triage/done; draft-reply ({account, "
             + "messageId}) suggests a reply; send-reply (the same, and content, all, to) sends it; find-out (the same, "
-            + "content and repo) has an agent look up what the reply leaves open. Prints one JSON line.")
+            + "content and repo) has an agent look up what the reply leaves open; accounts lists them; microsoft-sign-in and "
+            + "google-sign-in start signing in, microsoft-check and google-check finish it; sign-out ({account}) forgets one. "
+            + "Prints one JSON line.")
     String action;
+
+    @Option(names = "--google-listen", hidden = true, description = "Waits for your browser to come back from Google's sign-in")
+    boolean googleListen;
 
     static final Path RUNS = Config.CONFIG_DIR.resolve("runs");
     static final Path DONE = Config.CONFIG_DIR.resolve("done");
@@ -63,23 +71,35 @@ public class MailTriage implements Callable<Integer> {
     @Override
     public Integer call() {
         long startTime = System.currentTimeMillis();
+        if (googleListen) {
+            try {
+                return SignIn.googleListen(Config.load());
+            } catch (Exception e) {
+                System.err.println("Stopped listening for Google: " + e);
+                return 1;
+            }
+        }
         if (!waitForNetwork()) {
-            System.err.println("No network: couldn't reach Gmail.");
+            System.err.println("No network: couldn't reach your mail.");
             return 1;
         }
         Config config = Config.load();
         if (action != null) return action(config);
 
-        List<Config.GmailAccount> accounts = config.getGmailAccounts();
+        List<Config.Account> accounts = config.getAccounts();
         if (accounts.isEmpty()) {
-            System.err.println("No Gmail account set up: set Gmail account and Gmail app password in its settings.");
+            System.err.println("No account set up: set Gmail account and Gmail app password in Mail's settings, or sign in to Google or Microsoft there.");
             return 1;
         }
         List<Map<String, Object>> triageAccounts = new ArrayList<>();
-        for (Config.GmailAccount account : accounts) {
+        int failed = 0;
+        for (Config.Account account : accounts) {
             EmailTriage.AccountResult result = EmailTriage.processAccount(account, config.maxEmails, config.triageLabel, dryRun);
+            if (result.error() != null) failed++;
             Map<String, Object> accountData = new LinkedHashMap<>();
             accountData.put("email", account.email());
+            accountData.put("where", account.where());
+            if (result.error() != null) accountData.put("error", result.error());
             accountData.put("processed", result.results().size());
             accountData.put("markedRead", result.results().stream().filter(r -> "MARK_READ".equals(r.decision())).count());
             accountData.put("keptUnread", result.results().stream().filter(r -> "KEEP_UNREAD".equals(r.decision())).count());
@@ -109,6 +129,10 @@ public class MailTriage implements Callable<Integer> {
         } else {
             save(runData);
         }
+        if (failed == accounts.size()) {
+            System.err.println("Couldn't read " + (failed == 1 ? "your account" : "any of your accounts") + ": see above.");
+            return 1;
+        }
         System.out.println("Done!");
         return 0;
     }
@@ -116,6 +140,9 @@ public class MailTriage implements Callable<Integer> {
     /** --action done: the Mail tab's Done, its values on stdin (the runner checked them against elf.yaml). */
     private int action(Config config) {
         if (action.equals("learn-style") || action.equals("save-style")) return style(config);
+        if (List.of("accounts", "microsoft-sign-in", "microsoft-check", "google-sign-in", "google-check", "sign-out").contains(action)) {
+            return signIn(config);
+        }
         if (!List.of("done", "draft-reply", "send-reply", "find-out").contains(action)) {
             System.err.println("Not an action: " + action);
             return 2;
@@ -128,10 +155,10 @@ public class MailTriage implements Callable<Integer> {
             return 2;
         }
         String accountName = in.path("account").asText(""), messageId = in.path("messageId").asText("");
-        Config.GmailAccount account = config.getGmailAccounts().stream()
+        Config.Account account = config.getAccounts().stream()
                 .filter(a -> a.email().equalsIgnoreCase(accountName)).findFirst().orElse(null);
         if (account == null) {
-            System.err.println("Not a configured Gmail account: " + accountName);
+            System.err.println("Not one of Mail's accounts: " + accountName);
             return 2;
         }
         if (!action.equals("done")) return reply(account, in);
@@ -147,11 +174,43 @@ public class MailTriage implements Callable<Integer> {
         return 0;
     }
 
+    /**
+     * The accounts in Mail's settings: accounts lists them; microsoft-sign-in and google-sign-in start a sign-in, and
+     * microsoft-check and google-check (the tab asks every few seconds) say whether it's done; sign-out ({account})
+     * forgets one you signed in to.
+     */
+    private int signIn(Config config) {
+        try {
+            JsonNode in = action.equals("sign-out") ? JSON.readTree(System.in) : JSON.createObjectNode();
+            ObjectNode out = switch (action) {
+                case "microsoft-sign-in" -> SignIn.microsoftStart(config);
+                case "microsoft-check" -> SignIn.microsoftCheck(config);
+                case "google-sign-in" -> SignIn.googleStart(config);
+                case "google-check" -> SignIn.googleCheck();
+                case "sign-out" -> {
+                    String account = in.path("account").asText("").toLowerCase(java.util.Locale.ROOT);
+                    if (!SignIn.forget(account)) throw new IllegalArgumentException("Mail isn't signed in to " + account);
+                    yield JSON.createObjectNode().put("removed", account);
+                }
+                default -> JSON.createObjectNode();
+            };
+            out.set("accounts", SignIn.list(config));
+            System.out.println(JSON.writeValueAsString(out));
+            return 0;
+        } catch (IllegalArgumentException e) {
+            System.err.println(e.getMessage());
+            return 2;
+        } catch (Exception e) {
+            System.err.println("Couldn't sign in: " + e.getMessage());
+            return 1;
+        }
+    }
+
     /** learn-style (from your Sent folders) and save-style ({text}): how you write, for suggested replies. */
     private int style(Config config) {
         try {
             ObjectNode out = action.equals("learn-style")
-                    ? Style.learn(Reply.yourEmails(config.getGmailAccounts()), "sent emails")
+                    ? Style.learn(Reply.yourEmails(config.getAccounts()), "sent emails")
                     : Style.save(JSON.readTree(System.in).path("text").asText(""), "you");
             System.out.println(JSON.writeValueAsString(out));
             return 0;
@@ -164,8 +223,8 @@ public class MailTriage implements Callable<Integer> {
         }
     }
 
-    /** draft-reply and send-reply: the email is read from Gmail each time, so the reply goes where the email says. */
-    private int reply(Config.GmailAccount account, JsonNode in) {
+    /** draft-reply and send-reply: the email is read from its account each time, so the reply goes where the email says. */
+    private int reply(Config.Account account, JsonNode in) {
         try {
             Reply.Email e = Reply.find(account, in.path("messageId").asText(""));
             if (action.equals("draft-reply")) {

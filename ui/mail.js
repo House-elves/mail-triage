@@ -1,5 +1,5 @@
-// mail-triage's tab on Elf Desk, and its dashboard card: per Gmail account, what needs you and what the triage marked
-// read (and labelled). Done marks the thread read in Gmail, through the desk.
+// mail-triage's tab on Elf Desk, and its dashboard card: across your accounts (Gmail, Google Workspace, Outlook), what
+// needs you and what the triage marked read. Done marks the thread read in its account, through the desk.
 import {
     LitElement, html, css, shared, cardStyles, spinner, ago, runTime, took, count, isToday, settingsButton, Ticking, elf,
 } from '/elf-kit/1/kit.js';
@@ -7,11 +7,16 @@ import { runs, run, done, aiThisMonth, usd } from './runs.js';
 import './reply.js';
 
 
-function gmail(account, d) {
-    if (!d.messageId) return null;
+/** The email in Gmail's web page. Outlook's has no link by Message-ID, so its emails have none. */
+function gmail(a, d) {
+    if (!d.messageId || (a.where ?? 'gmail') !== 'gmail') return null;
+    const account = a.email;
     const id = d.messageId.replace(/^<|>$/g, '');
     return `https://mail.google.com/mail/?authuser=${encodeURIComponent(account)}#search/rfc822msgid:${encodeURIComponent(id)}`;
 }
+
+/** Which email, in which account: the same email can reach two of yours. */
+const key = (account, d) => `${account}\n${d.messageId}`;
 
 /** The run's accounts, each decision with when you marked it Done (doneAt). */
 function withDone(data, marks) {
@@ -27,7 +32,7 @@ class MailTab extends LitElement {
         _runs: { state: true },
         _run: { state: true },
         _aiMonth: { state: true },   // what Claude cost over this month's runs, or null
-        _replying: { state: true },  // the Message-ID whose reply is open
+        _replying: { state: true },  // the email whose reply is open (key())
         _accounts: { state: true },
         _picked: { state: true },
         _doing: { state: true },
@@ -52,6 +57,7 @@ class MailTab extends LitElement {
         .subject { font-weight: 500; overflow-wrap: anywhere; color: var(--ink); text-decoration: none; }
         a.subject:hover { text-decoration: underline; }
         .from, .why { font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }
+        .to { white-space: nowrap; }
         details > summary { cursor: pointer; padding: 11px 18px; font-size: 14px; color: var(--muted); }
         details[open] > summary { border-bottom: 1px solid var(--line); }
         .empty { color: var(--muted); padding: 14px 18px; margin: 0; font-size: 14px; }
@@ -101,18 +107,18 @@ class MailTab extends LitElement {
         this._accounts = withDone(this._run?.data, await done());
     }
 
-    /** Done, or on its way there: clicked, and Gmail hasn't answered yet. */
-    _isDone(d) {
-        return !!d.doneAt || this._hiding.has(d.messageId);
+    /** Done, or on its way there: clicked, and its account hasn't answered yet. */
+    _isDone(account, d) {
+        return !!d.doneAt || this._hiding.has(key(account, d));
     }
 
     /**
-     * Done: the email moves to the done list straight away, so the next one can be read, and Gmail marks the thread
-     * read in the background. The clicks go one at a time. One Gmail refuses comes back, with the error.
+     * Done: the email moves to the done list straight away, so the next one can be read, and its account marks the
+     * thread read in the background. The clicks go one at a time. One its account refuses comes back, with the error.
      */
     _done(account, d) {
-        const id = d.messageId;
-        this._hiding = new Set(this._hiding).add(id);
+        const id = d.messageId, k = key(account, d);
+        this._hiding = new Set(this._hiding).add(k);
         this._error = null;
         this._queue = this._queue.then(async () => {
             try {
@@ -122,7 +128,7 @@ class MailTab extends LitElement {
                 this._error = `${d.subject || 'That email'}: ${e.message}`;
             } finally {
                 const hiding = new Set(this._hiding);
-                hiding.delete(id);
+                hiding.delete(k);
                 this._hiding = hiding;
             }
         });
@@ -131,7 +137,7 @@ class MailTab extends LitElement {
     /** What still needs you in the newest run, across accounts: what Done all marks. */
     _open() {
         return (this._accounts ?? []).flatMap(a => (a.decisions ?? [])
-            .filter(d => d.decision !== 'MARK_READ' && !this._isDone(d) && d.messageId).map(d => ({ account: a.email, d })));
+            .filter(d => d.decision !== 'MARK_READ' && !this._isDone(a.email, d) && d.messageId).map(d => ({ account: a.email, d })));
     }
 
     /** Done all: each email in turn, as if you clicked its Done. One that fails is left for you; the rest go on. */
@@ -142,7 +148,7 @@ class MailTab extends LitElement {
         for (let i = 0; i < todo.length; i++) {
             const { account, d } = todo[i];
             this._all = { at: i + 1, of: todo.length };
-            this._doing = d.messageId;
+            this._doing = key(account, d);
             try {
                 await elf.act('done', { account, messageId: d.messageId });
             } catch (e) {
@@ -160,31 +166,33 @@ class MailTab extends LitElement {
         if (this._picked || (!n && !this._all)) return '';
         if (this._all?.of) return html`<div class="all" role="status">${spinner} Marking ${this._all.at} of ${this._all.of} read…</div>`;
         if (this._all === 'confirm') return html`<div class="all" role="group" aria-label="Confirm Done all">
-            Mark all ${n} ${n === 1 ? 'email' : 'emails'} read in Gmail?
+            Mark all ${n} ${n === 1 ? 'email' : 'emails'} read?
             <button class="sm primary" @click=${this._doneAll}>Mark all read</button>
             <button class="sm quiet" @click=${() => { this._all = null; }}>Cancel</button></div>`;
         return html`<div class="all"><button class="sm" ?disabled=${this._doing || this._hiding.size}
             @click=${() => { this._all = 'confirm'; }}>Done all (${n})</button></div>`;
     }
 
-    _email(account, d, canDo) {
-        const href = gmail(account, d);
+    /** An email: its subject (a link to it in Gmail), who sent it, and with several accounts, which one it came to. */
+    _email(a, d, canDo, many) {
+        const account = a.email, k = key(account, d);
+        const href = gmail(a, d);
         const subject = (d.subject || '(no subject)').replace(/\s+/g, ' ');
         return html`<li>
             <span class="text">
                 ${href ? html`<a class="subject" href=${href} target="_blank" rel="noopener">${subject}</a>`
                     : html`<span class="subject">${subject}</span>`}
-                <span class="from">${d.from}</span>
+                <span class="from">${d.from}${many ? html` <span class="to">to ${account}</span>` : ''}</span>
                 <span class="why">${d.reason}</span>
             </span>
             ${canDo && d.messageId ? html`<span class="acts">
-                <button class="sm" aria-expanded=${this._replying === d.messageId ? 'true' : 'false'}
+                <button class="sm" aria-expanded=${this._replying === k ? 'true' : 'false'}
                     title="Claude suggests a reply for you to edit; nothing is sent until you click Send and confirm it"
-                    @click=${() => { this._replying = this._replying === d.messageId ? null : d.messageId; }}>Reply</button>
+                    @click=${() => { this._replying = this._replying === k ? null : k; }}>Reply</button>
                 <button class="sm" ?disabled=${this._all?.of}
-                title="Marks the thread read in Gmail" @click=${() => this._done(account, d)}>
-                ${this._doing === d.messageId ? spinner : ''}Done</button></span>` : ''}
-            ${this._replying === d.messageId ? html`<elf-reply class="reply"
+                title="Marks the thread read in ${account}" @click=${() => this._done(account, d)}>
+                ${this._doing === k ? spinner : ''}Done</button></span>` : ''}
+            ${this._replying === k ? html`<elf-reply class="reply"
                 .suggest=${() => elf.act('draft-reply', { account, messageId: d.messageId })}
                 .options=${[{ key: 'all', label: 'Reply all', hint: "Also to the email's other recipients, as Cc" }]}
                 .send=${(draft, text, o) => elf.act('send-reply', { account, messageId: d.messageId, all: !!o.all,
@@ -194,31 +202,39 @@ class MailTab extends LitElement {
         </li>`;
     }
 
+    /**
+     * One list across your accounts: what needs you, then what you marked Done and what the triage marked read. Each
+     * email says which account it came to when there's more than one; an account it couldn't read says why.
+     */
     _triage() {
         const accounts = this._accounts ?? [];
-        if (!accounts.length) return html`<p class="muted">This run had no Gmail accounts to triage.</p>`;
+        if (!accounts.length) return html`<p class="muted">This run had no accounts to sort.</p>`;
+        const many = accounts.length > 1;
+        const all = accounts.flatMap(a => a.decisions.map(d => ({ a, d })));
+        const kept = all.filter(x => x.d.decision !== 'MARK_READ' && !this._isDone(x.a.email, x.d));
+        const doneList = all.filter(x => x.d.decision !== 'MARK_READ' && this._isDone(x.a.email, x.d));
+        const read = all.filter(x => x.d.decision === 'MARK_READ');
+        const failed = accounts.filter(a => a.error);
+        const labelled = read.some(x => (x.a.where ?? 'gmail') === 'gmail');
         return html`
-            <section aria-label="Your inboxes">
-                ${accounts.map(a => {
-                    const kept = a.decisions.filter(d => d.decision !== 'MARK_READ' && !this._isDone(d));
-                    const doneList = a.decisions.filter(d => d.decision !== 'MARK_READ' && this._isDone(d));
-                    const read = a.decisions.filter(d => d.decision === 'MARK_READ');
-                    return html`
-                        <div class="account">
-                            ${a.email}
-                            <span class="chip ${kept.length ? 'warn' : 'ok'}">${kept.length} need you</span>
-                            <span class="chip">${read.length} marked read</span>
-                        </div>
-                        <div class="panel">
-                            ${kept.length ? html`<ul>${kept.map(d => this._email(a.email, d, true))}</ul>`
-                                : html`<p class="empty">${doneList.length ? 'All done.' : 'Nothing in this inbox needs you.'}</p>`}
-                        </div>
-                        ${doneList.length ? html`<details class="panel"><summary>Done (${doneList.length})</summary>
-                            <ul>${doneList.map(d => this._email(a.email, d))}</ul></details>` : ''}
-                        ${read.length ? html`<details class="panel"><summary>Marked read and labelled (${read.length})</summary>
-                            <ul>${read.map(d => this._email(a.email, d))}</ul></details>` : ''}
-                    `;
-                })}
+            <section aria-label="Your inbox">
+                <div class="account">
+                    ${accounts.map(a => {
+                        const need = kept.filter(x => x.a === a).length;
+                        return html`<span class="chip ${a.error ? 'bad' : need ? 'warn' : 'ok'}">${a.email}: ${a.error
+                            ? "couldn't read it" : `${need} need you`}</span>`;
+                    })}
+                    <span class="chip">${read.length} marked read</span>
+                </div>
+                ${failed.map(a => html`<p class="error" role="alert">Couldn't read ${a.email}: ${a.error}</p>`)}
+                <div class="panel">
+                    ${kept.length ? html`<ul>${kept.map(x => this._email(x.a, x.d, true, many))}</ul>`
+                        : html`<p class="empty">${doneList.length ? 'All done.' : `Nothing in ${many ? 'your inboxes' : 'your inbox'} needs you.`}</p>`}
+                </div>
+                ${doneList.length ? html`<details class="panel"><summary>Done (${doneList.length})</summary>
+                    <ul>${doneList.map(x => this._email(x.a, x.d, false, many))}</ul></details>` : ''}
+                ${read.length ? html`<details class="panel"><summary>Marked read${labelled ? ' (and labelled, at Gmail)' : ''} (${read.length})</summary>
+                    <ul>${read.map(x => this._email(x.a, x.d, false, many))}</ul></details>` : ''}
             </section>`;
     }
 
@@ -234,7 +250,7 @@ class MailTab extends LitElement {
                     </p>
                 </div>${settingsButton(null, 'Mail settings')}</div>
                 <elf-run-bar command="triage" label="Refresh" .runs=${this._runs ?? []} .picked=${this._picked}
-                    note="Goes through your unread Gmail: noise is marked read and labelled, the rest stays unread and is listed here with the reason."
+                    note="Goes through your unread mail in each account: noise is marked read, the rest stays unread and is listed here with the reason."
                     @run-picked=${e => { this._picked = e.detail; this._load(); }}
                     @run-finished=${() => { this._picked = null; this._load(); }}></elf-run-bar>
                 ${this._error ? html`<p class="error" role="alert">${this._error}</p>` : ''}
@@ -308,11 +324,11 @@ class MailCard extends LitElement {
 customElements.define('mail-tab', MailTab);
 customElements.define('mail-card', MailCard);
 if (elf.view === 'settings') {
-    // How you write, at the top of the desk's Settings pop-up for Mail.
-    await import('./style.js');
+    // Your accounts, then how you write, at the top of the desk's Settings pop-up for Mail.
+    await Promise.all([import('./accounts.js'), import('./style.js')]);
     const style = document.createElement('elf-style');
     style.what = 'sent emails';
-    document.body.append(style);
+    document.body.append(document.createElement('mail-accounts'), style);
 } else {
     document.body.append(document.createElement(elf.view === 'card' ? 'mail-card' : 'mail-tab'));
 }

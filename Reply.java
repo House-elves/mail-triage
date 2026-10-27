@@ -14,8 +14,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 
 /**
- * A reply from the Mail tab: the email and its thread as Gmail has them now, a reply Claude suggests for you to
- * edit, and sending what you wrote through Gmail (SMTP, with the account's app password), in the same thread. Who it
+ * A reply from the Mail tab: the email and its thread as the account's mail has them now, a reply Claude suggests for
+ * you to edit, and sending what you wrote from that account (SMTP, as it signs in), in the same thread. Who it
  * goes to is always worked out here, from the email: its sender (Reply-To if it has one), and for Reply all its
  * other recipients too; the tab only says which email and what to say.
  */
@@ -33,7 +33,7 @@ public class Reply {
      * @param others its other recipients (To and Cc), without you or {@code to}: Reply all adds them as Cc
      * @param thread the thread's messages, oldest first, as {from, date, body}
      */
-    record Email(Config.GmailAccount account, String messageId, String subject, String references, InternetAddress to,
+    record Email(Config.Account account, String messageId, String subject, String references, InternetAddress to,
             List<InternetAddress> others, String from, String date, String body, List<Map<String, String>> thread) {
 
         String where() {
@@ -50,20 +50,17 @@ public class Reply {
         }
     }
 
-    static Email find(Config.GmailAccount account, String messageId) throws Exception {
+    static Email find(Config.Account account, String messageId) throws Exception {
         String id = messageId == null ? "" : messageId.strip().replaceAll("^<|>$", "");
         if (!EmailTriage.MESSAGE_ID.matcher(id).matches()) throw new IllegalArgumentException("Not a Message-ID: " + messageId);
-        Properties props = new Properties();
-        props.put("mail.store.protocol", "imaps");
-        Store store = Session.getInstance(props).getStore("imaps");
-        store.connect("imap.gmail.com", account.email(), account.password());
+        Store store = Mailbox.store(account);
         try {
             Folder inbox = store.getFolder("INBOX");
             inbox.open(Folder.READ_ONLY);
             try {
                 var imap = (org.eclipse.angus.mail.imap.IMAPFolder) inbox;
                 @SuppressWarnings("unchecked")
-                List<Long> uids = (List<Long>) imap.doCommand(p -> {
+                List<Long> uids = !account.gmail() ? EmailTriage.thread(imap, id, false) : (List<Long>) imap.doCommand(p -> {
                     List<Long> found = EmailTriage.uidSearch(p, "X-GM-RAW \"rfc822msgid:" + id + "\"");
                     if (found.isEmpty()) return found;
                     String thread = null;
@@ -170,20 +167,20 @@ public class Reply {
 
     /**
      * Your own recent emails, from each account's Sent folder (Gmail names it in your language, so it's found by its
-     * \\Sent flag), for {@link Style#learn}: the newest 30 an account, without what they quote, each cut short.
+     * \\Sent flag, or Outlook's name for it), for {@link Style#learn}: the newest 30 an account, without what they
+     * quote, each cut short.
      */
-    static List<String> yourEmails(List<Config.GmailAccount> accounts) throws Exception {
+    static List<String> yourEmails(List<Config.Account> accounts) throws Exception {
         List<String> out = new ArrayList<>();
-        for (Config.GmailAccount account : accounts) {
-            Properties props = new Properties();
-            props.put("mail.store.protocol", "imaps");
-            Store store = Session.getInstance(props).getStore("imaps");
-            store.connect("imap.gmail.com", account.email(), account.password());
+        for (Config.Account account : accounts) {
+            Store store = Mailbox.store(account);
             try {
-                Folder sent = null;
+                Folder sent = null, named = null;
                 for (Folder f : store.getDefaultFolder().list("*")) {
                     if (f instanceof org.eclipse.angus.mail.imap.IMAPFolder i && Arrays.asList(i.getAttributes()).contains("\\Sent")) sent = f;
+                    if (f.getFullName().equalsIgnoreCase("Sent Items") || (named == null && f.getFullName().equalsIgnoreCase("Sent"))) named = f;
                 }
+                if (sent == null) sent = named;
                 if (sent == null) continue;
                 sent.open(Folder.READ_ONLY);
                 try {
@@ -219,13 +216,7 @@ public class Reply {
         String text = content == null ? "" : content.strip();
         if (text.isEmpty()) throw new IllegalArgumentException("Nothing to send");
         if (text.length() > MAX_REPLY) throw new IllegalArgumentException("That's longer than a reply from here can be");
-        Properties props = new Properties();
-        props.put("mail.smtp.host", "smtp.gmail.com");
-        props.put("mail.smtp.port", "587");
-        props.put("mail.smtp.auth", "true");
-        props.put("mail.smtp.starttls.enable", "true");
-        props.put("mail.smtp.starttls.required", "true");
-        Session session = Session.getInstance(props);
+        Session session = Mailbox.smtp(e.account());
         MimeMessage reply = new MimeMessage(session);
         reply.setFrom(new InternetAddress(e.account().email()));
         reply.setRecipient(Message.RecipientType.TO, e.to());
@@ -237,8 +228,7 @@ public class Reply {
         clip(e.body()).lines().forEach(l -> quoted.append("> ").append(l).append('\n'));
         reply.setText(text + "\n\nOn " + e.date() + ", " + e.from() + " wrote:\n" + quoted, "UTF-8");
         reply.setSentDate(new Date());
-        try (Transport t = session.getTransport("smtp")) {
-            t.connect("smtp.gmail.com", e.account().email(), e.account().password());
+        try (Transport t = Mailbox.transport(session, e.account())) {
             reply.saveChanges();
             t.sendMessage(reply, reply.getAllRecipients());
         }

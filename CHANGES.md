@@ -3,6 +3,15 @@
 What changed for you in each version of the Mail elf, newest first. The desk shows the parts that are new when it offers you an
 update.
 
+## 1.6.0
+
+- More than Gmail: sign in to Google for Google Workspace (and any Gmail, without an app password), and sign in to
+  Microsoft for Outlook and Office 365. Your accounts are listed at the top of Mail's settings, with Remove.
+- One list for all your accounts: each email says which account it came to, and replies go from that account.
+- An account it couldn't read says why at the top of the tab, instead of looking empty.
+- Signing in needs an app ID of yours from Google or Microsoft: the README says how to make one. Calendar can use the
+  same Microsoft app.
+
 ## 1.5.0
 
 - Find out in my repos: no need to type a repo first. Claude picks the one of your repos likeliest to answer the
