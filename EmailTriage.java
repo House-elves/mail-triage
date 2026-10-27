@@ -362,6 +362,7 @@ public class EmailTriage {
                 List<Long> unread = account.gmail() ? (List<Long>) imap.doCommand(p -> {
                     List<Long> found = uidSearch(p, "X-GM-RAW \"rfc822msgid:" + id + "\"");
                     if (found.isEmpty()) return found;
+                    if (found.size() > 1) throw new IllegalArgumentException(SAME_ID);
                     String thread = null;
                     for (var r : p.command("UID FETCH " + found.get(0) + " (X-GM-THRID)", null)) {
                         Matcher m = THRID.matcher(r.toString());
@@ -403,9 +404,12 @@ public class EmailTriage {
         fp.add("Message-ID");
         fp.add("References");
         inbox.fetch(recent, fp);
+        // A Message-ID is the sender's to write, so another email can copy one: with two, it won't guess which.
         Message target = null;
         for (Message m : recent) {
-            if (safeHeader(m, "Message-ID").strip().replaceAll("^<|>$", "").equals(id)) target = m;
+            if (!safeHeader(m, "Message-ID").strip().replaceAll("^<|>$", "").equals(id)) continue;
+            if (target != null) throw new IllegalArgumentException(SAME_ID);
+            target = m;
         }
         if (target == null) return new ArrayList<>();
         String root = rootOf(target);
@@ -422,6 +426,8 @@ public class EmailTriage {
         String refs = safeHeader(m, "References").strip();
         return !refs.isEmpty() ? refs.split("\\s+")[0] : safeHeader(m, "Message-ID").strip();
     }
+
+    static final String SAME_ID = "Two emails in the inbox have the same Message-ID, so Mail can't tell which one you mean: answer it in your mail instead.";
 
     static final Pattern THRID = Pattern.compile("X-GM-THRID (\\d+)");
 

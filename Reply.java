@@ -63,6 +63,7 @@ public class Reply {
                 List<Long> uids = !account.gmail() ? EmailTriage.thread(imap, id, false) : (List<Long>) imap.doCommand(p -> {
                     List<Long> found = EmailTriage.uidSearch(p, "X-GM-RAW \"rfc822msgid:" + id + "\"");
                     if (found.isEmpty()) return found;
+                    if (found.size() > 1) throw new IllegalArgumentException(EmailTriage.SAME_ID);
                     String thread = null;
                     for (var r : p.command("UID FETCH " + found.get(0) + " (X-GM-THRID)", null)) {
                         Matcher m = EmailTriage.THRID.matcher(r.toString());
