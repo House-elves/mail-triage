@@ -53,6 +53,7 @@ public class Reply {
     static Email find(Config.Account account, String messageId) throws Exception {
         String id = messageId == null ? "" : messageId.strip().replaceAll("^<|>$", "");
         if (!EmailTriage.MESSAGE_ID.matcher(id).matches()) throw new IllegalArgumentException("Not a Message-ID: " + messageId);
+        if (account.graph()) return Graph.find(account, id);
         Store store = Mailbox.store(account);
         try {
             Folder inbox = store.getFolder("INBOX");
@@ -174,6 +175,13 @@ public class Reply {
     static List<String> yourEmails(List<Config.Account> accounts) throws Exception {
         List<String> out = new ArrayList<>();
         for (Config.Account account : accounts) {
+            if (account.graph()) {
+                for (String body : Graph.sent(account, 30)) {
+                    String own = ownWords(body);
+                    if (own.length() >= 20) out.add(own.length() <= 1_500 ? own : own.substring(0, 1_500));
+                }
+                continue;
+            }
             Store store = Mailbox.store(account);
             try {
                 Folder sent = null, named = null;
@@ -217,7 +225,7 @@ public class Reply {
         String text = content == null ? "" : content.strip();
         if (text.isEmpty()) throw new IllegalArgumentException("Nothing to send");
         if (text.length() > MAX_REPLY) throw new IllegalArgumentException("That's longer than a reply from here can be");
-        Session session = Mailbox.smtp(e.account());
+        Session session = e.account().graph() ? Session.getInstance(new Properties()) : Mailbox.smtp(e.account());
         MimeMessage reply = new MimeMessage(session);
         reply.setFrom(new InternetAddress(e.account().email()));
         reply.setRecipient(Message.RecipientType.TO, e.to());
@@ -229,6 +237,11 @@ public class Reply {
         clip(e.body()).lines().forEach(l -> quoted.append("> ").append(l).append('\n'));
         reply.setText(text + "\n\nOn " + e.date() + ", " + e.from() + " wrote:\n" + quoted, "UTF-8");
         reply.setSentDate(new Date());
+        if (e.account().graph()) {
+            reply.saveChanges();
+            Graph.send(e.account(), reply);
+            return JSON.createObjectNode().put("sent", reply.getMessageID()).put("where", e.recipients(all));
+        }
         try (Transport t = Mailbox.transport(session, e.account())) {
             reply.saveChanges();
             t.sendMessage(reply, reply.getAllRecipients());
@@ -261,11 +274,14 @@ public class Reply {
     }
 
     private static String date(Message m) {
-        Date d = sent(m);
+        return date(sent(m));
+    }
+
+    static String date(Date d) {
         return d == null ? "an unknown date" : DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, Locale.ENGLISH).format(d);
     }
 
-    private static String clip(String s) {
+    static String clip(String s) {
         String t = s == null ? "" : s.strip();
         return t.length() <= BODY_MAX ? t : t.substring(0, BODY_MAX) + "\n[…]";
     }

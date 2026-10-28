@@ -3,13 +3,13 @@
 // Office 365) add one the way Thunderbird and Evolution do: you sign in at Google's or Microsoft's own page.
 import { LitElement, html, css, shared, spinner, elf } from '/elf-kit/1/kit.js';
 
-const HOW = { gmail: 'Gmail, app password', google: 'Google, signed in', microsoft: 'Outlook, signed in' };
+const HOW = { gmail: 'Gmail, app password', google: 'Google, signed in', microsoft: 'Outlook, signed in', graph: 'Outlook, signed in' };
 
 class MailAccounts extends LitElement {
 
     static properties = {
         _list: { state: true },      // [{email, kind, where}]
-        _signin: { state: true },    // {who: 'google' | 'microsoft', url, code}
+        _signin: { state: true },    // {who: 'google' | 'microsoft', url, code, paste}
         _busy: { state: true },
         _said: { state: true },
         _error: { state: true },
@@ -29,6 +29,8 @@ class MailAccounts extends LitElement {
         .code { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-control); }
         .code p { margin: 0; font-size: 14px; }
         .code b { font: 600 20px var(--font-code); letter-spacing: 0.08em; }
+        .code form { display: flex; flex-wrap: wrap; gap: 8px; }
+        .code input { flex: 1 1 18rem; min-width: 0; }
         .note { font-size: 13px; color: var(--muted); }
         .error { margin: 0; }
     `];
@@ -60,7 +62,8 @@ class MailAccounts extends LitElement {
 
     /**
      * Signs in: Microsoft shows a code to type at its page, Google opens its own page and comes back to Mail on this
-     * machine. Either way it then asks every few seconds whether you have, until the account is in the list.
+     * machine. Either way it then asks every few seconds whether you have, until the account is in the list. An app
+     * with a return address (Microsoft return address) has you paste where its page lands instead.
      */
     async _signIn(who) {
         clearTimeout(this._poll);
@@ -76,7 +79,8 @@ class MailAccounts extends LitElement {
             this._error = 'That sign-in page isn\'t Google\'s or Microsoft\'s, so it isn\'t shown.';
             return;
         }
-        this._signin = { who, url: a.url, code: a.code };
+        this._signin = { who, url: a.url, code: a.code, paste: !!a.paste };
+        if (a.paste) return;
         const wait = Math.max(3, Math.min(30, a.interval ?? 5)) * 1000;
         const check = async () => {
             if (!this._signin) return;
@@ -92,6 +96,20 @@ class MailAccounts extends LitElement {
         this._poll = setTimeout(check, wait);
     }
 
+    /** The address Microsoft's page landed on, its one-time code in it. */
+    async _finish(ev) {
+        ev.preventDefault();
+        const address = new FormData(ev.target).get('address')?.trim();
+        if (!address) return;
+        this._busy = 'microsoft';
+        const r = await this._act('microsoft-finish', { address });
+        this._busy = null;
+        if (r?.added) {
+            this._signin = null;
+            this._said = `Signed in to ${r.added}. Refresh the Mail tab to sort it.`;
+        }
+    }
+
     _cancel() {
         clearTimeout(this._poll);
         this._signin = null;
@@ -105,6 +123,16 @@ class MailAccounts extends LitElement {
 
     _signInBox() {
         const s = this._signin;
+        if (s.paste) return html`<div class="code" role="status">
+            <p><a href=${s.url} target="_blank" rel="noopener">Open Microsoft's sign-in</a> and sign in to your work account.
+                You land on a blank page: copy its whole address from the address bar and paste it here straight away: the code in it only lasts a few minutes.</p>
+            <form @submit=${this._finish}>
+                <input name="address" type="url" required autocomplete="off" spellcheck="false" aria-label="The blank page's address"
+                    placeholder="https://…?code=…">
+                <button class="sm" ?disabled=${!!this._busy}>${this._busy ? spinner : ''}Finish signing in</button>
+            </form>
+            <p class="note"><button class="sm quiet" @click=${this._cancel}>Stop</button></p>
+        </div>`;
         if (s.who === 'microsoft') return html`<div class="code" role="status">
             <p>Open <a href=${s.url} target="_blank" rel="noopener">${s.url}</a>, type this code and sign in to your work
                 or school account:</p>
@@ -138,7 +166,9 @@ class MailAccounts extends LitElement {
             <p class="hint"><b>Gmail</b>: an app password below, or Sign in to Google. <b>Google Workspace</b> (work Gmail)
                 that won't make app passwords: Sign in to Google. <b>Outlook</b> and Office 365: Sign in to Microsoft.
                 Signing in needs an app of yours that Google or Microsoft knows: its ID goes in <b>Google client ID</b>
-                (with its secret) or <b>Microsoft app ID</b> below, and Mail's README says how to make one. A work account's
+                (with its secret) or <b>Microsoft app ID</b> below, and Mail's README says how to make one. An
+                organisation's app that won't take a code also needs <b>Microsoft organisation</b> and <b>Microsoft return
+                address</b>. A work account's
                 admin may have to allow that app first, as they allowed Thunderbird or Evolution.</p>
         </section>`;
     }

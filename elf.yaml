@@ -1,7 +1,7 @@
 # A House Elves elf: what Elf Desk needs to install, set up and run mail-triage.
 name: mail-triage
 title: Mail
-version: 1.6.0
+version: 1.7.0
 author: "@phillip-kruger"
 description: Sorts your unread mail with Claude, from Gmail, Google Workspace and Outlook (Office 365). Noise is marked read; what needs you is listed on its Mail tab.
 main: MailTriage.java
@@ -9,14 +9,14 @@ config: ~/.config/mail-triage/config
 tools: [claude]
 
 reads:
-  - Your unread inboxes over IMAP. Gmail with an app password (imap.gmail.com). Or an account you sign in to in its Settings, as Thunderbird and Evolution do. Google, for Gmail and Google Workspace, reads at imap.gmail.com after you sign in at accounts.google.com. Microsoft, for Outlook and Office 365, reads at outlook.office365.com after you sign in at login.microsoftonline.com.
+  - Your unread inboxes over IMAP. Gmail with an app password (imap.gmail.com). Or an account you sign in to in its Settings, as Thunderbird and Evolution do. Google, for Gmail and Google Workspace, reads at imap.gmail.com after you sign in at accounts.google.com. Microsoft, for Outlook and Office 365, reads at outlook.office365.com after you sign in at login.microsoftonline.com. An organisation's app with a return address (as Evolution signs in) reads through Microsoft Graph (graph.microsoft.com) instead, only your own mailbox.
   - An email's thread when you ask it to suggest a reply (Claude reads it, with no tools).
   - When you click Find out, an agent (the runner's, in its sandbox, after a safety check, able only to read) reads the thread and the repo you name, to fill in what the reply leaves open.
   - The repos you maintain, from the GitHub elf's settings if it's installed, so a suggested reply can say where to look.
 writes:
   - Marks the noise read, and at Gmail labels it with your noise label.
   - Marks an email's thread read when you click Done.
-  - Sends your reply to an email (to its sender, and with Reply all its other recipients), from the account it came to over SMTP (smtp.gmail.com or smtp.office365.com), only when you click and confirm it in the desk's bar.
+  - Sends your reply to an email (to its sender, and with Reply all its other recipients), from the account it came to over SMTP (smtp.gmail.com or smtp.office365.com) or through Microsoft Graph, only when you click and confirm it in the desk's bar.
   - Keeps the sign-ins you made in ~/.config/mail-triage/signins.json, readable only by you, until you remove the account. Signing in to Google, it listens on this machine (127.0.0.1) for up to 5 minutes for your browser to come back from Google's page.
 
 # The accounts you sign in to are a list at the top of its Settings pop-up (ui/accounts.js), which the sign-in actions
@@ -48,6 +48,18 @@ settings:
   - key: MICROSOFT_APP_ID
     label: Microsoft app ID
     help: Only for Sign in to Microsoft. The Application (client) ID of an app registered in Microsoft Entra that may read and send mail; Mail's README says how to get one. Calendar's app can be the same one.
+    kind: text
+    default: ""
+    optional: true
+  - key: MICROSOFT_TENANT
+    label: Microsoft organisation
+    help: Only for an app your organisation registered for itself alone. Its Directory (tenant) ID, or its domain. Leave it empty for any account.
+    kind: text
+    default: ""
+    optional: true
+  - key: MICROSOFT_REDIRECT
+    label: Microsoft return address
+    help: Only for an app that won't take a sign-in code, like an organisation's app for Evolution. Its redirect URI, e.g. https://login.microsoftonline.com/common/oauth2/nativeclient. Mail then reads and sends through Microsoft Graph, and you paste the address you land on after signing in.
     kind: text
     default: ""
     optional: true
@@ -140,6 +152,13 @@ actions:
     label: Finish signing in to Microsoft
     args: [--action=microsoft-check]
     ask: false
+  microsoft-finish:
+    label: Finish signing in to Microsoft with where its page landed
+    args: [--action=microsoft-finish]
+    ask: false
+    params:
+      # The blank page's address, with Microsoft's one-time code: only good with the key the sign-in kept.
+      address: {pattern: "https?://[\\x21-\\x7E]{10,4000}", max: 4100}
   google-sign-in:
     label: Sign in to Google
     confirm: Sign in to Google so Mail can read, mark and send your Gmail?

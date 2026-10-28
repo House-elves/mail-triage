@@ -47,7 +47,10 @@ import java.util.regex.Pattern;
  * through here, and Mail is given a pass to read, mark and send your mail and nothing else.
  *
  * <ul>
- * <li><b>Microsoft</b> signs in with a code: Mail shows it, you type it at microsoft.com/devicelogin.</li>
+ * <li><b>Microsoft</b> signs in with a code: Mail shows it, you type it at microsoft.com/devicelogin. Mail then reads over
+ * IMAP. An app that won't take a code (an organisation's app for Evolution, say) signs in as Evolution does instead:
+ * you open Microsoft's page, sign in, and paste the address you land on (its return address, with a one-time code)
+ * into Mail. Mail then reads through Microsoft Graph, which such an organisation allows where it doesn't allow IMAP.</li>
  * <li><b>Google</b> doesn't let mail be read that way, so Mail listens on this machine (127.0.0.1, for 5 minutes) for
  * your browser to come back from Google's page. The action that starts it can't wait that long, so it starts Mail
  * again in the background to listen.</li>
@@ -62,11 +65,15 @@ public class SignIn {
     static final Path LOCK = Config.CONFIG_DIR.resolve("signins.lock");
     static final ObjectMapper JSON = new ObjectMapper();
 
-    static final String MS_LOGIN = "https://login.microsoftonline.com/common/oauth2/v2.0/";
+    /** Not final: a test answers in Microsoft's place. */
+    static String msLogin = "https://login.microsoftonline.com/";
     /** Read and mark your mail (IMAP) and send it (SMTP), and keep signed in: nothing else in your account. */
     static final String MS_MAIL = "offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send";
     /** And, once, who you are: the sign-in's name and address. */
     static final String MS_SCOPES = "openid email profile " + MS_MAIL;
+    /** Read and mark your mail and send it through Microsoft Graph, and keep signed in: what Evolution is allowed, less. */
+    static final String MS_GRAPH = "offline_access https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/User.Read";
+    static final Duration MS_PASTE_WAIT = Duration.ofMinutes(30);
 
     static final String GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
     /** Not final: a test answers in Google's place. */
@@ -77,6 +84,10 @@ public class SignIn {
 
     static final Pattern APP_ID = Pattern.compile("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
     static final Pattern GOOGLE_ID = Pattern.compile("[0-9]{4,30}-[0-9a-z]{10,64}\\.apps\\.googleusercontent\\.com");
+    /** An organisation's tenant: its ID, a domain, or common / organizations. */
+    static final Pattern TENANT = Pattern.compile("[A-Za-z0-9][A-Za-z0-9.-]{0,99}");
+    /** A return address: HTTPS, or this machine. */
+    static final Pattern REDIRECT = Pattern.compile("(https://[A-Za-z0-9.-]{1,253}|http://(localhost|127\\.0\\.0\\.1)(:\\d{1,5})?)(/[\\x21-\\x7E&&[^?#]]{0,300})?");
     static final Pattern ACCOUNT = Pattern.compile("[\\w.+'-]{1,64}@[\\w.-]{1,250}");
 
     /** Passes already fetched this run, by address. A test puts its own here. */
@@ -91,6 +102,7 @@ public class SignIn {
         read().path("accounts").properties().forEach(e -> {
             JsonNode a = e.getValue();
             if (a.path("kind").asText().equals("microsoft")) out.add(Config.Account.microsoft(e.getKey(), a.path("login").asText(e.getKey())));
+            else if (a.path("kind").asText().equals("graph")) out.add(Config.Account.graph(e.getKey(), a.path("login").asText(e.getKey())));
             else if (a.path("kind").asText().equals("google")) out.add(Config.Account.google(e.getKey()));
         });
         return out;
@@ -112,13 +124,16 @@ public class SignIn {
     static String token(Config.Account a) throws IOException, InterruptedException {
         String cached = TOKENS.get(a.email());
         if (cached != null) return cached;
-        String who = a.kind() == Config.Kind.MICROSOFT ? "Microsoft" : "Google";
-        String refresh = read().path("accounts").path(a.email()).path("refreshToken").asText("");
+        boolean microsoft = a.kind() == Config.Kind.MICROSOFT || a.graph();
+        String who = microsoft ? "Microsoft" : "Google";
+        JsonNode kept = read().path("accounts").path(a.email());
+        String refresh = kept.path("refreshToken").asText("");
         if (refresh.isEmpty()) throw new IOException("Mail isn't signed in to " + a.email() + ". Sign in to " + who + " in Mail's settings.");
         Map<String, String> raw = Config.load().raw;
-        JsonNode r = a.kind() == Config.Kind.MICROSOFT
-                ? post(MS_LOGIN + "token", Map.of("client_id", appId(raw), "grant_type", "refresh_token", "refresh_token", refresh,
-                        "scope", MS_MAIL))
+        // At the organisation it signed in at, which may since have changed in the settings.
+        JsonNode r = microsoft
+                ? post(msLogin(kept.path("tenant").asText(tenant(raw))) + "token", Map.of("client_id", appId(raw), "grant_type", "refresh_token",
+                        "refresh_token", refresh, "scope", a.graph() ? MS_GRAPH : MS_MAIL))
                 : post(googleToken, Map.of("client_id", googleId(raw), "client_secret", googleSecret(raw), "grant_type", "refresh_token",
                         "refresh_token", refresh));
         if (!r.hasNonNull("access_token")) {
@@ -146,13 +161,58 @@ public class SignIn {
         return id;
     }
 
-    /** Starts signing in: answers {code, url, interval}, the code to type and where. */
+    /** The organisation Microsoft signs in at: Microsoft organisation in the settings, else any (common). */
+    static String tenant(Map<String, String> raw) {
+        String t = raw.getOrDefault("MICROSOFT_TENANT", "").strip();
+        if (t.isEmpty()) return "common";
+        if (!TENANT.matcher(t).matches()) {
+            throw new IllegalArgumentException("Microsoft organisation in Mail's settings should be its Directory (tenant) ID or its domain, like contoso.com.");
+        }
+        return t;
+    }
+
+    static String msLogin(String tenant) {
+        return msLogin + tenant + "/oauth2/v2.0/";
+    }
+
+    /** Microsoft return address in the settings, for an app that won't take a code; null without one. */
+    static String redirect(Map<String, String> raw) {
+        String r = raw.getOrDefault("MICROSOFT_REDIRECT", "").strip();
+        if (r.isEmpty()) return null;
+        if (!REDIRECT.matcher(r).matches()) {
+            throw new IllegalArgumentException("Microsoft return address in Mail's settings should be the app's redirect URI, like https://login.microsoftonline.com/common/oauth2/nativeclient.");
+        }
+        return r;
+    }
+
+    /**
+     * Starts signing in: answers {code, url, interval}, the code to type and where. With a return address, it answers
+     * {url, paste: true} instead: Microsoft's page to sign in at, and you paste where you land into {@link #microsoftFinish}.
+     */
     static ObjectNode microsoftStart(Config cfg) throws IOException, InterruptedException {
-        JsonNode r = post(MS_LOGIN + "devicecode", Map.of("client_id", appId(cfg.raw), "scope", MS_SCOPES));
+        String clientId = appId(cfg.raw), tenant = tenant(cfg.raw), redirect = redirect(cfg.raw);
+        if (redirect != null) {
+            String verifier = random(48), state = random(24);
+            String until = Instant.now().plus(MS_PASTE_WAIT).toString();
+            update(s -> s.putObject("microsoft").put("state", state).put("verifier", verifier).put("tenant", tenant)
+                    .put("redirect", redirect).put("until", until));
+            Map<String, String> q = new LinkedHashMap<>();
+            q.put("client_id", clientId);
+            q.put("response_type", "code");
+            q.put("redirect_uri", redirect);
+            q.put("response_mode", "query");
+            q.put("scope", "openid email profile " + MS_GRAPH);
+            q.put("code_challenge", Base64.getUrlEncoder().withoutPadding().encodeToString(sha256(verifier)));
+            q.put("code_challenge_method", "S256");
+            q.put("state", state);
+            q.put("prompt", "select_account");
+            return JSON.createObjectNode().put("url", msLogin(tenant) + "authorize?" + form(q)).put("paste", true);
+        }
+        JsonNode r = post(msLogin(tenant) + "devicecode", Map.of("client_id", clientId, "scope", MS_SCOPES));
         if (!r.hasNonNull("device_code") || !r.hasNonNull("user_code")) throw new IllegalArgumentException("Microsoft wouldn't start signing in: " + error(r));
         String deviceCode = r.get("device_code").asText();
         String until = Instant.now().plusSeconds(Math.min(1800, r.path("expires_in").asLong(900))).toString();
-        update(s -> s.putObject("microsoft").put("deviceCode", deviceCode).put("until", until));
+        update(s -> s.putObject("microsoft").put("deviceCode", deviceCode).put("tenant", tenant).put("until", until));
         // Only Microsoft's own sign-in page is shown as a link.
         String url = r.path("verification_uri").asText("");
         if (!url.matches("https://(www\\.)?microsoft\\.com/[\\w/]{1,40}|https://login\\.microsoftonline\\.com/[\\w/]{1,60}")) url = "https://microsoft.com/devicelogin";
@@ -169,7 +229,8 @@ public class SignIn {
             update(s -> s.remove("microsoft"));
             throw new IllegalArgumentException("The code ran out before you signed in. Click Sign in to Microsoft again.");
         }
-        JsonNode r = post(MS_LOGIN + "token", Map.of("client_id", appId(cfg.raw), "grant_type", "urn:ietf:params:oauth:grant-type:device_code",
+        String tenant = pending.path("tenant").asText("common");
+        JsonNode r = post(msLogin(tenant) + "token", Map.of("client_id", appId(cfg.raw), "grant_type", "urn:ietf:params:oauth:grant-type:device_code",
                 "device_code", pending.get("deviceCode").asText()));
         String err = r.path("error").asText("");
         if (err.equals("authorization_pending") || err.equals("slow_down")) return JSON.createObjectNode().put("waiting", true);
@@ -186,9 +247,57 @@ public class SignIn {
             throw new IllegalArgumentException("Signed in, but Microsoft didn't say which account it is. Try again.");
         }
         String refresh = r.get("refresh_token").asText();
-        update(s -> s.withObject("/accounts").putObject(email).put("kind", "microsoft").put("login", login).put("refreshToken", refresh)
-                .put("at", Instant.now().toString()));
+        update(s -> s.withObject("/accounts").putObject(email).put("kind", "microsoft").put("login", login).put("tenant", tenant)
+                .put("refreshToken", refresh).put("at", Instant.now().toString()));
         return JSON.createObjectNode().put("added", email);
+    }
+
+    /**
+     * Finishes a sign-in with a return address: {@code address} is where your browser landed after Microsoft's page, its
+     * one-time code in it. That code is only good with the key {@link #microsoftStart} kept, for the sign-in it began.
+     * Keeps the sign-in and answers {added}.
+     */
+    static ObjectNode microsoftFinish(Config cfg, String address) throws IOException, InterruptedException {
+        JsonNode pending = read().path("microsoft");
+        if (!pending.hasNonNull("state")) throw new IllegalArgumentException("Click Sign in to Microsoft first.");
+        if (Instant.parse(pending.path("until").asText(Instant.EPOCH.toString())).isBefore(Instant.now())) {
+            update(s -> s.remove("microsoft"));
+            throw new IllegalArgumentException("That sign-in was started more than 30 minutes ago. Click Sign in to Microsoft again.");
+        }
+        String redirect = pending.path("redirect").asText(), tenant = pending.path("tenant").asText("common");
+        String pasted = address == null ? "" : address.strip();
+        int q = pasted.indexOf('?');
+        if (q < 0 || !pasted.substring(0, q).equals(redirect)) {
+            throw new IllegalArgumentException("That isn't the page you land on after signing in. Copy the whole address of the blank page, starting " + redirect + "?code=");
+        }
+        Map<String, String> got = query(pasted.substring(q + 1).replaceAll("#.*$", ""));
+        if (got.containsKey("error")) {
+            update(s -> s.remove("microsoft"));
+            throw new IllegalArgumentException(got.get("error").equals("access_denied") ? "You said no to Microsoft, so Mail isn't signed in."
+                    : "Microsoft said no: " + error(JSON.createObjectNode().put("error", got.get("error")).put("error_description", got.getOrDefault("error_description", ""))));
+        }
+        if (!pending.path("state").asText().equals(got.get("state"))) {
+            throw new IllegalArgumentException("That address is from another sign-in. Use the link Mail shows now, then paste where it lands.");
+        }
+        update(s -> s.remove("microsoft"));
+        JsonNode r = post(msLogin(tenant) + "token", Map.of("client_id", appId(cfg.raw), "grant_type", "authorization_code",
+                "code", got.getOrDefault("code", ""), "redirect_uri", redirect, "code_verifier", pending.path("verifier").asText(), "scope", MS_GRAPH));
+        if (!r.hasNonNull("refresh_token") || !r.hasNonNull("access_token")) throw new IllegalArgumentException("Couldn't sign in: " + error(r));
+        if (!(" " + r.path("scope").asText("") + " ").toLowerCase(Locale.ROOT).contains("mail.readwrite")) {
+            throw new IllegalArgumentException("Signed in, but Microsoft didn't allow Mail to read your mail. Your organisation may have to allow it.");
+        }
+        String login = claims(r.path("id_token").asText("")).path("preferred_username").asText("").strip().toLowerCase(Locale.ROOT);
+        // Your mailbox's own address, which may not be the name you sign in with.
+        String email = Graph.me(r.get("access_token").asText()).toLowerCase(Locale.ROOT);
+        if (email.isEmpty()) email = login;
+        if (!ACCOUNT.matcher(login).matches() || !ACCOUNT.matcher(email).matches()) {
+            throw new IllegalArgumentException("Signed in, but Microsoft didn't say which account it is. Try again.");
+        }
+        String refresh = r.get("refresh_token").asText(), mailbox = email;
+        update(s -> s.withObject("/accounts").putObject(mailbox).put("kind", "graph").put("login", login).put("tenant", tenant)
+                .put("refreshToken", refresh).put("at", Instant.now().toString()));
+        TOKENS.remove(mailbox);
+        return JSON.createObjectNode().put("added", mailbox);
     }
 
     // ---- Google: back to this machine from Google's page ----
@@ -396,7 +505,10 @@ public class SignIn {
         if (d.contains("AADSTS65001") || d.contains("AADSTS90094") || d.contains("AADSTS90095") || d.contains("admin_policy_enforced")) {
             return "your organisation has to allow Mail's app first. Send your admin its app ID and ask them to allow it.";
         }
-        if (d.contains("AADSTS7000218")) return "turn on Allow public client flows in the app's Authentication settings.";
+        if (d.contains("AADSTS7000218")) {
+            return "that app won't take a sign-in code. Turn on Allow public client flows in its Authentication settings, or set its redirect URI as Microsoft return address in Mail's settings.";
+        }
+        if (d.contains("AADSTS50011")) return "the app doesn't know that return address. Check Microsoft return address in Mail's settings.";
         if (d.contains("AADSTS700016") || d.contains("AADSTS700038")) return "Microsoft doesn't know that app ID. Check Microsoft app ID in Mail's settings.";
         if (d.contains("The OAuth client was not found") || d.contains("invalid_client")) return "Google doesn't know that client. Check Google client ID and secret in Mail's settings.";
         d = d.lines().findFirst().orElse(d);

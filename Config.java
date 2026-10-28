@@ -24,8 +24,12 @@ public class Config {
 
     Map<String, String> raw;
 
-    /** How an account signs in: Gmail with an app password, or a sign-in to Google or to Microsoft. */
-    enum Kind { GMAIL, GOOGLE, MICROSOFT }
+    /**
+     * How an account signs in: Gmail with an app password, or a sign-in to Google or to Microsoft. A Microsoft sign-in
+     * with a code reads over IMAP ({@code MICROSOFT}); one that comes back to a return address, as Evolution's does,
+     * reads through Microsoft Graph ({@code GRAPH}), for an organisation that allows its app there but not IMAP.
+     */
+    enum Kind { GMAIL, GOOGLE, MICROSOFT, GRAPH }
 
     /**
      * An inbox to sort.
@@ -46,6 +50,15 @@ public class Config {
 
         static Account microsoft(String email, String login) {
             return new Account(email, login, Kind.MICROSOFT, null, "outlook.office365.com", 993, "smtp.office365.com", 587);
+        }
+
+        static Account graph(String email, String login) {
+            return new Account(email, login, Kind.GRAPH, null, "graph.microsoft.com", 443, "graph.microsoft.com", 443);
+        }
+
+        /** Its mail is read and sent through Microsoft Graph, not IMAP and SMTP. */
+        boolean graph() {
+            return kind == Kind.GRAPH;
         }
 
         /** Its mail is at Gmail, which has labels, threads and rfc822msgid: search of its own. */

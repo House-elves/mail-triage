@@ -6,6 +6,7 @@
 //SOURCES Config.java
 //SOURCES Mailbox.java
 //SOURCES SignIn.java
+//SOURCES Graph.java
 //SOURCES EmailTriage.java
 //SOURCES Reply.java
 //SOURCES Style.java
@@ -46,7 +47,7 @@ import java.util.stream.Stream;
  * at Gmail labelled), the rest stays unread and is saved with the reason, for its Mail tab on Elf Desk. Sends nothing
  * but the replies you send from the tab.
  */
-@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.6.0",
+@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.7.0",
         description = "Sorts your unread mail with Claude, for Elf Desk's Mail tab")
 public class MailTriage implements Callable<Integer> {
 
@@ -57,7 +58,7 @@ public class MailTriage implements Callable<Integer> {
             + "marks the thread read in its account and records it in ~/.config/mail-triage/done; draft-reply ({account, "
             + "messageId}) suggests a reply; send-reply (the same, and content, all, to) sends it; find-out (the same, "
             + "content and repo) has an agent look up what the reply leaves open; accounts lists them; microsoft-sign-in and "
-            + "google-sign-in start signing in, microsoft-check and google-check finish it; sign-out ({account}) forgets one. "
+            + "google-sign-in start signing in, microsoft-check and google-check finish it (microsoft-finish ({address}) with a return address); sign-out ({account}) forgets one. "
             + "Prints one JSON line.")
     String action;
 
@@ -140,7 +141,7 @@ public class MailTriage implements Callable<Integer> {
     /** --action done: the Mail tab's Done, its values on stdin (the runner checked them against elf.yaml). */
     private int action(Config config) {
         if (action.equals("learn-style") || action.equals("save-style")) return style(config);
-        if (List.of("accounts", "microsoft-sign-in", "microsoft-check", "google-sign-in", "google-check", "sign-out").contains(action)) {
+        if (List.of("accounts", "microsoft-sign-in", "microsoft-check", "microsoft-finish", "google-sign-in", "google-check", "sign-out").contains(action)) {
             return signIn(config);
         }
         if (!List.of("done", "draft-reply", "send-reply", "find-out").contains(action)) {
@@ -176,15 +177,17 @@ public class MailTriage implements Callable<Integer> {
 
     /**
      * The accounts in Mail's settings: accounts lists them; microsoft-sign-in and google-sign-in start a sign-in, and
-     * microsoft-check and google-check (the tab asks every few seconds) say whether it's done; sign-out ({account})
+     * microsoft-check and google-check (the tab asks every few seconds) say whether it's done, or microsoft-finish
+     * ({address}) finishes it with where Microsoft's page landed, for an app with a return address; sign-out ({account})
      * forgets one you signed in to.
      */
     private int signIn(Config config) {
         try {
-            JsonNode in = action.equals("sign-out") ? JSON.readTree(System.in) : JSON.createObjectNode();
+            JsonNode in = action.equals("sign-out") || action.equals("microsoft-finish") ? JSON.readTree(System.in) : JSON.createObjectNode();
             ObjectNode out = switch (action) {
                 case "microsoft-sign-in" -> SignIn.microsoftStart(config);
                 case "microsoft-check" -> SignIn.microsoftCheck(config);
+                case "microsoft-finish" -> SignIn.microsoftFinish(config, in.path("address").asText(""));
                 case "google-sign-in" -> SignIn.googleStart(config);
                 case "google-check" -> SignIn.googleCheck();
                 case "sign-out" -> {

@@ -3,6 +3,13 @@
 What changed for you in each version of the Mail elf, newest first. The desk shows the parts that are new when it offers you an
 update.
 
+## 1.7.0
+
+- Outlook at an organisation that only allows its own app, the way Evolution signs in: set **Microsoft organisation** and
+  **Microsoft return address**. Sign in to Microsoft then gives you a link, and you paste the address you land on.
+  Mail then reads, marks and sends through Microsoft Graph, so it works where your organisation turned IMAP off.
+- Sign-in errors from Microsoft say which setting to check.
+
 ## 1.6.0
 
 - More than Gmail: sign in to Google for Google Workspace (and any Gmail, without an app password), and sign in to

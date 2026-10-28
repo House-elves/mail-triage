@@ -31,7 +31,8 @@ public class EmailTriage {
         String bodyPreview,
         String messageId,
         String inReplyTo,
-        String references
+        String references,
+        String conversation
     ) {}
 
     record Decision(String decision, String reason) {}
@@ -43,6 +44,7 @@ public class EmailTriage {
 
     /** The account's unread INBOX emails, the newest {@code maxEmails}. Throws when it can't get in. */
     static List<EmailInfo> fetchUnreadEmails(Config.Account account, int maxEmails) throws Exception {
+        if (account.graph()) return Graph.unread(account, maxEmails);
         List<EmailInfo> emails = new ArrayList<>();
         Store store = Mailbox.store(account);
         try {
@@ -79,7 +81,7 @@ public class EmailTriage {
                         }
 
                         emails.add(new EmailInfo(uid, from, to, cc, subject, date,
-                                listId, body, messageId, inReplyTo, references));
+                                listId, body, messageId, inReplyTo, references, ""));
                     } catch (Exception e) {
                         // Skip problematic messages
                     }
@@ -95,7 +97,9 @@ public class EmailTriage {
 
     // ── Thread deduplication ──
 
+    /** What groups an email with its thread: Outlook's conversation through Graph, else the first of its References. */
     static String threadRootKey(EmailInfo em) {
+        if (!em.conversation().isEmpty()) return "conversation:" + em.conversation();
         String refs = em.references();
         if (!refs.isEmpty()) {
             String[] parts = refs.split("\\s+");
@@ -279,6 +283,14 @@ public class EmailTriage {
      * retried once on a fresh one; the operation is idempotent.
      */
     static void markAsRead(Config.Account account, List<String> uids, String label) {
+        if (account.graph()) {
+            try {
+                System.out.println("  Marked " + Graph.markRead(account, uids) + " of " + uids.size() + " emails as read.");
+            } catch (Exception e) {
+                System.err.println("  Error marking " + uids.size() + " emails as read: " + e.getMessage());
+            }
+            return;
+        }
         List<Long> all = new ArrayList<>();
         for (String u : uids) {
             try {
@@ -353,6 +365,7 @@ public class EmailTriage {
     static int markThreadRead(Config.Account account, String messageId) throws Exception {
         String id = messageId == null ? "" : messageId.strip().replaceAll("^<|>$", "");
         if (!MESSAGE_ID.matcher(id).matches()) throw new IllegalArgumentException("Not a Message-ID: " + messageId);
+        if (account.graph()) return Graph.markThreadRead(account, id);
         Store store = Mailbox.store(account);
         try {
             Folder inbox = store.getFolder("INBOX");

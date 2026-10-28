@@ -45,6 +45,18 @@ Google and Microsoft only let an app they know sign in, so each needs an app of 
 
 A work account's admin decides which apps may sign in. If Google says access is blocked, or Microsoft says your organisation has to allow the app first, send IT your app's ID and ask them to allow it. It's the same kind of permission they gave Thunderbird or Evolution. Some organisations also turn IMAP or SMTP sign-in off for Outlook: then reading or sending says so, and only IT can turn it back on.
 
+### An organisation's app, the way Evolution signs in
+
+Your organisation may already have an app it allows for your mail, for example one it registered for Evolution, but not let it use IMAP or a sign-in code. Mail can sign in with that app the way Evolution does, and read and send through Microsoft Graph instead of IMAP and SMTP. Set these in Mail's settings, from that app's settings (in Evolution: the account's *Receiving Email*, *Advanced settings*):
+
+- **Microsoft app ID:** its application (client) ID.
+- **Microsoft organisation:** its tenant ID, if it's only for your organisation.
+- **Microsoft return address:** its redirect URI, for example `https://login.microsoftonline.com/common/oauth2/nativeclient`.
+
+**Sign in to Microsoft** then shows a link instead of a code. Sign in there, and you land on a blank page. Copy its whole address from the address bar and paste it into Mail straight away, because the one-time code in it only lasts a few minutes. Mail asks for less than Evolution does: only to read, mark and send your mail (`Mail.ReadWrite`, `Mail.Send`) and your name (`User.Read`). It only uses your own mailbox: the inbox, Sent Items, and sending your reply.
+
+Using an app your organisation registered for another program is between you and your organisation. Check that it's allowed.
+
 ## Install
 
 In Elf Desk, the **+** after the last tab: **Add** it, which adds the Mail tab. Then add your accounts in its Settings (see above). Once one is set up it sorts your inbox for the first time. After that it runs when you click **Refresh** (or the dashboard's **Refresh everything**) and on weekdays at 07:00, which you can change in its settings.
