@@ -25,6 +25,8 @@ public class Reply {
     /** The thread's last messages Claude reads, and how much of each. */
     static final int READ_BACK = 8, BODY_MAX = 6_000;
     static final int MAX_REPLY = 20_000;
+    /** A Message-ID in a References header: printable, no spaces or brackets inside. */
+    static final java.util.regex.Pattern REFERENCE = java.util.regex.Pattern.compile("<[\\x21-\\x7E&&[^<>]]{1,500}>");
 
     /**
      * The email you reply to, and its thread for context.
@@ -232,7 +234,13 @@ public class Reply {
         if (all && !e.others().isEmpty()) reply.setRecipients(Message.RecipientType.CC, e.others().toArray(new Address[0]));
         reply.setSubject(e.subject().matches("(?i)^\\s*re:.*") ? e.subject() : "Re: " + e.subject(), "UTF-8");
         reply.setHeader("In-Reply-To", e.messageId());
-        reply.setHeader("References", (e.references().isBlank() ? "" : e.references().strip() + " ") + e.messageId());
+        // Only the Message-IDs of the email's References: it's the sender's to write, so nothing else (a line break and a
+        // header of theirs) goes into your reply.
+        StringJoiner refs = new StringJoiner(" ");
+        java.util.regex.Matcher ref = REFERENCE.matcher(e.references());
+        while (ref.find()) refs.add(ref.group());
+        refs.add(e.messageId());
+        reply.setHeader("References", refs.toString());
         StringBuilder quoted = new StringBuilder();
         clip(e.body()).lines().forEach(l -> quoted.append("> ").append(l).append('\n'));
         reply.setText(text + "\n\nOn " + e.date() + ", " + e.from() + " wrote:\n" + quoted, "UTF-8");
