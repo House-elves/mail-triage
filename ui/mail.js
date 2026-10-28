@@ -5,6 +5,7 @@ import {
 } from '/elf-kit/1/kit.js';
 import { runs, run, done, aiThisMonth, usd } from './runs.js';
 import './reply.js';
+import { colourOf } from './accounts.js';
 
 
 /** The email in Gmail's web page. Outlook's has no link by Message-ID, so its emails have none. */
@@ -34,6 +35,7 @@ class MailTab extends LitElement {
         _aiMonth: { state: true },   // what Claude cost over this month's runs, or null
         _replying: { state: true },  // the email whose reply is open (key())
         _accounts: { state: true },
+        _colours: { state: true },   // the accounts as Settings has them now, for their colours
         _picked: { state: true },
         _doing: { state: true },
         _hiding: { state: true },
@@ -49,7 +51,8 @@ class MailTab extends LitElement {
         section { display: grid; gap: 14px; }
         .account { font-weight: 600; font-size: 15px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
         ul { list-style: none; margin: 0; padding: 4px 0; }
-        li { padding: 11px 18px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 14px; align-items: center; }
+        li { padding: 11px 18px 11px 15px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 14px; align-items: center;
+            border-left: 3px solid transparent; }
         li > .text { display: grid; gap: 3px; min-width: 0; }
         li + li { border-top: 1px solid var(--line); }
         li .acts { display: flex; gap: 8px; }
@@ -57,6 +60,9 @@ class MailTab extends LitElement {
         .subject { font-weight: 500; overflow-wrap: anywhere; color: var(--ink); text-decoration: none; }
         a.subject:hover { text-decoration: underline; }
         .from, .why { font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }
+        /* Claude's sentence or two on what it's about and where it stands, as Zulip's digests. */
+        .digest { font-size: 14px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; margin-top: 2px; max-width: 70ch; }
+        .chip .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: 1px; }
         .to { white-space: nowrap; }
         details > summary { cursor: pointer; padding: 11px 18px; font-size: 14px; color: var(--muted); }
         details[open] > summary { border-bottom: 1px solid var(--line); }
@@ -77,6 +83,14 @@ class MailTab extends LitElement {
     connectedCallback() {
         super.connectedCallback();
         this._load();
+        // Each account's colour as it is now, not as it was at the last run.
+        elf.act('accounts', {}).then(r => { if (r?.accounts) this._colours = r.accounts; }).catch(() => {});
+    }
+
+    /** An account's colour: as Settings has it, else as the run saved it, else by its place. */
+    _colour(a) {
+        if (this._colours?.some(x => x.email === a.email)) return colourOf(this._colours, a.email);
+        return a.colour || colourOf(this._accounts, a.email);
     }
 
     async _load() {
@@ -178,12 +192,12 @@ class MailTab extends LitElement {
         const account = a.email, k = key(account, d);
         const href = gmail(a, d);
         const subject = (d.subject || '(no subject)').replace(/\s+/g, ' ');
-        return html`<li>
+        return html`<li style="border-left-color:${this._colour(a)}">
             <span class="text">
                 ${href ? html`<a class="subject" href=${href} target="_blank" rel="noopener">${subject}</a>`
                     : html`<span class="subject">${subject}</span>`}
                 <span class="from">${d.from}${many ? html` <span class="to">to ${account}</span>` : ''}</span>
-                <span class="why">${d.reason}</span>
+                ${d.summary ? html`<span class="digest">${d.summary}</span>` : html`<span class="why">${d.reason}</span>`}
             </span>
             ${canDo && d.messageId ? html`<span class="acts">
                 <button class="sm" aria-expanded=${this._replying === k ? 'true' : 'false'}
@@ -221,7 +235,8 @@ class MailTab extends LitElement {
                 <div class="account">
                     ${accounts.map(a => {
                         const need = kept.filter(x => x.a === a).length;
-                        return html`<span class="chip ${a.error ? 'bad' : need ? 'warn' : 'ok'}">${a.email}: ${a.error
+                        return html`<span class="chip ${a.error ? 'bad' : need ? 'warn' : 'ok'}"><span class="dot"
+                            style="background:${this._colour(a)}"></span>${a.email}: ${a.error
                             ? "couldn't read it" : `${need} need you`}</span>`;
                     })}
                     <span class="chip">${read.length} marked read</span>
@@ -250,7 +265,7 @@ class MailTab extends LitElement {
                     </p>
                 </div>${settingsButton(null, 'Mail settings')}</div>
                 <elf-run-bar command="triage" label="Refresh" .runs=${this._runs ?? []} .picked=${this._picked}
-                    note="Goes through your unread mail in each account: noise is marked read, the rest stays unread and is listed here with the reason."
+                    note="Goes through your unread mail in each account: noise is marked read, the rest stays unread and is listed here, each summed up in a sentence or two."
                     @run-picked=${e => { this._picked = e.detail; this._load(); }}
                     @run-finished=${() => { this._picked = null; this._load(); }}></elf-run-bar>
                 ${this._error ? html`<p class="error" role="alert">${this._error}</p>` : ''}

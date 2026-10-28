@@ -1,16 +1,20 @@
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 /**
- * ~/.config/mail-triage/config: the accounts to triage and how. Elf Desk writes it from its settings. The accounts you
- * signed in to (Google or Microsoft) are kept apart, in {@link SignIn#FILE}.
+ * ~/.config/mail-triage/config: how much to sort and the noise label, which Elf Desk writes from its settings, and the
+ * Google client and Microsoft app signing in uses, which Add account writes. The accounts themselves (signed in, or
+ * Gmail with an app password) are kept apart, in {@link SignIn#FILE}.
  */
 public class Config {
 
@@ -96,11 +100,59 @@ public class Config {
         }
         Config c = new Config();
         c.raw = raw;
+        moveGmail(raw);
         c.gmailAddress = raw.getOrDefault("GMAIL_ADDRESS", "");
         c.gmailAppPassword = raw.getOrDefault("GMAIL_APP_PASSWORD", "");
         c.maxEmails = Integer.parseInt(raw.getOrDefault("MAX_EMAILS", "50"));
         c.triageLabel = raw.getOrDefault("TRIAGE_LABEL", "non-actionable");
         return c;
+    }
+
+    /**
+     * The Gmail with an app password that the desk's settings used to hold moves to the accounts list, where the others
+     * are (owner-only too), so Add account and Remove handle it like any other. Its settings lines are emptied after.
+     */
+    static void moveGmail(Map<String, String> raw) {
+        String address = raw.getOrDefault("GMAIL_ADDRESS", "").strip().toLowerCase(java.util.Locale.ROOT);
+        String password = raw.getOrDefault("GMAIL_APP_PASSWORD", "").strip();
+        if (address.isEmpty() || password.isEmpty()) return;
+        try {
+            SignIn.update(s -> {
+                if (!s.path("accounts").has(address)) {
+                    s.withObject("/accounts").putObject(address).put("kind", "gmail").put("password", password)
+                            .put("at", java.time.Instant.now().toString());
+                }
+            });
+            set(Map.of("GMAIL_ADDRESS", "", "GMAIL_APP_PASSWORD", ""));
+            raw.put("GMAIL_ADDRESS", "");
+            raw.put("GMAIL_APP_PASSWORD", "");
+        } catch (IOException e) {
+            // Left where it is: it's still read from there, and moved next time.
+        }
+    }
+
+    /** Settings Add account sets, like the Microsoft app: an empty value takes its line out. Written whole, owner-only. */
+    static void set(Map<String, String> values) throws IOException {
+        for (String v : values.values()) {
+            if (v.chars().anyMatch(ch -> ch < 0x20)) throw new IllegalArgumentException("That has a line break in it.");
+        }
+        List<String> out = new ArrayList<>();
+        if (Files.exists(CONFIG_PATH)) {
+            for (String line : Files.readAllLines(CONFIG_PATH)) {
+                int eq = line.indexOf('=');
+                String key = eq > 0 ? line.substring(0, eq).strip() : "";
+                if (!values.containsKey(key)) out.add(line);
+            }
+        }
+        new TreeMap<>(values).forEach((k, v) -> {
+            if (!v.isEmpty()) out.add(k + "=" + v);
+        });
+        Files.createDirectories(CONFIG_DIR);
+        Path tmp = CONFIG_PATH.resolveSibling("config.new");
+        Files.deleteIfExists(tmp);
+        Files.createFile(tmp, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+        Files.write(tmp, out);
+        Files.move(tmp, CONFIG_PATH, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     }
 
     /**

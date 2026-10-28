@@ -4,7 +4,7 @@
 
 A House Elf that sorts your unread mail with [Claude Code](https://claude.com/claude-code), for its **Mail** tab on [Elf Desk](https://github.com/House-elves/elf-desk). It reads Gmail, Google Workspace and Outlook (Office 365), as many accounts as you like.
 
-Each run connects to each account over IMAP, fetches the unread emails (one per thread), and asks Claude whether each needs you. Noise is marked read, and at Gmail labelled with your noise label (Outlook has no labels over IMAP, so there it's only marked read). The rest stays unread and is listed on the Mail tab with the reason: one list for all your accounts, each email saying which account it came to. An account it couldn't read says why, at the top. **Done** on an email marks its thread read in its account.
+Each run connects to each account over IMAP, fetches the unread emails (one per thread), and asks Claude whether each needs you. Noise is marked read, and at Gmail labelled with your noise label (Outlook has no labels over IMAP, so there it's only marked read). The rest stays unread and is listed on the Mail tab, each with a sentence or two from Claude on what it's about and where it stands (as Zulip's digests do), from the same call that sorted it: one list for all your accounts, each email in its account's colour and saying which account it came to. An account it couldn't read says why, at the top. **Done** on an email marks its thread read in its account.
 
 **Reply** on an email asks Claude for a suggested reply, from the email and the part of its thread everyone you'd reply to already saw. You edit it, tick **Reply all** if it should also go to the email's other recipients, and **Send** sends it from the account the email came to (SMTP, signed in the same way) in the same thread, quoting the email, once you confirm it in the desk's bar. Who it goes to always comes from the email itself. Nothing else is ever sent.
 
@@ -18,28 +18,28 @@ Threads another elf already owns skip Claude and are marked read directly: GitHu
 
 ## Your accounts
 
-They're listed at the top of Mail's Settings.
+They're listed at the top of Mail's Settings, each in a colour you pick (click its dot to change it). **Add account** asks where the mail is, then only what that one needs:
 
-- **Gmail with an app password:** set **Gmail account** and **Gmail app password** in its settings ([make one](https://myaccount.google.com/apppasswords)).
-- **Sign in to Google:** for Gmail without an app password, and Google Workspace accounts whose admin turned app passwords off. It opens Google's own sign-in page. Mail listens on this machine (127.0.0.1) for up to 5 minutes for your browser to come back from it.
-- **Sign in to Microsoft:** for Outlook and Office 365, which no longer take a password over IMAP. It shows a code to type at [microsoft.com/devicelogin](https://microsoft.com/devicelogin).
+- **Gmail**, with an app password ([make one](https://myaccount.google.com/apppasswords)): Mail checks Gmail takes it before adding it.
+- **Google**, signing in: for Gmail without an app password, and Google Workspace accounts whose admin turned app passwords off. It opens Google's own sign-in page. Mail listens on this machine (127.0.0.1) for up to 5 minutes for your browser to come back from it.
+- **Microsoft**, signing in: for Outlook and Office 365, which no longer take a password over IMAP. It shows a code to type at [microsoft.com/devicelogin](https://microsoft.com/devicelogin).
 
-Signing in works the way Thunderbird and Evolution do: your password goes only to Google or Microsoft. Mail is given a pass to read, mark and send your mail and nothing else in the account. It keeps that pass in `~/.config/mail-triage/signins.json`, readable only by you, until you **Remove** the account.
+Signing in works the way Thunderbird and Evolution do: your password goes only to Google or Microsoft. Mail is given a pass to read, mark and send your mail and nothing else in the account. It keeps that pass (or a Gmail's app password) in `~/.config/mail-triage/signins.json`, readable only by you, until you **Remove** the account.
 
-Google and Microsoft only let an app they know sign in, so each needs an app of yours:
+Google and Microsoft only let an app they know sign in, so each needs an app of yours. Add account asks for it the first time, and keeps it for the next account:
 
 - **Google:** in [Google Cloud](https://console.cloud.google.com):
   1. Make a project and turn on the Gmail API.
   2. Set up its OAuth consent screen (External), then **Publish app**, so it's *In production*. While it's *Testing*, Google ends its sign-ins after 7 days.
   3. Under *Credentials*, create an *OAuth client ID* of type *Desktop app*.
-  4. Copy its client ID and secret into **Google client ID** and **Google client secret**.
+  4. Copy its client ID and secret into Add account.
 
   Signing in then warns that Google hasn't verified the app. It's your own app, so *Advanced* and *Go to …* is fine.
 - **Microsoft:** in the [Microsoft Entra admin center](https://entra.microsoft.com):
   1. *App registrations*, *New registration*, any name, *Accounts in any organizational directory and personal Microsoft accounts*, no redirect address.
   2. Under *Authentication*, turn on *Allow public client flows*.
   3. Under *API permissions*, add Microsoft Graph's delegated `IMAP.AccessAsUser.All`, `SMTP.Send`, `offline_access`, `openid`, `email` and `profile`.
-  4. Copy its *Application (client) ID* into **Microsoft app ID**.
+  4. Copy its *Application (client) ID* into Add account.
 
   Calendar can use the same app: add `Calendars.Read` and `User.Read` to it too, so your admin has one app to allow.
 
@@ -47,11 +47,10 @@ A work account's admin decides which apps may sign in. If Google says access is 
 
 ### An organisation's app, the way Evolution signs in
 
-Your organisation may already have an app it allows for your mail, for example one it registered for Evolution, but not let it use IMAP or a sign-in code. Mail can sign in with that app the way Evolution does, and read and send through Microsoft Graph instead of IMAP and SMTP. Set these in Mail's settings, from that app's settings (in Evolution: the account's *Receiving Email*, *Advanced settings*):
+Your organisation may already have an app it allows for your mail, for example one it registered for Evolution, but not let it use IMAP or a sign-in code. Mail can sign in with that app the way Evolution does, and read and send through Microsoft Graph instead of IMAP and SMTP. If Evolution on this machine signs in with it, Add account finds it and offers **Use Evolution's app**. Otherwise give its ID, tick *It's my organisation's own app*, and give, from that app's settings (in Evolution: the account's *Receiving Email*, *Override Microsoft 365 OAuth2 settings*):
 
-- **Microsoft app ID:** its application (client) ID.
-- **Microsoft organisation:** its tenant ID, if it's only for your organisation.
-- **Microsoft return address:** its redirect URI, for example `https://login.microsoftonline.com/common/oauth2/nativeclient`.
+- **Organisation:** its tenant ID.
+- **Return address:** its redirect URI, for example `https://login.microsoftonline.com/common/oauth2/nativeclient` (Evolution's empty one means this).
 
 **Sign in to Microsoft** then shows a link instead of a code. Sign in there, and you land on a blank page. Copy its whole address from the address bar and paste it into Mail straight away, because the one-time code in it only lasts a few minutes. Mail asks for less than Evolution does: only to read, mark and send your mail (`Mail.ReadWrite`, `Mail.Send`) and your name (`User.Read`). It only uses your own mailbox: the inbox, Sent Items, and sending your reply.
 
@@ -85,4 +84,4 @@ echo '{}' | jbang MailTriage.java --action=google-check        # once you're bac
 echo '{"account":"you@example.com"}' | jbang MailTriage.java --action=sign-out
 ```
 
-Settings are in `~/.config/mail-triage/config` (only readable by you): `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_APP_ID`, `MAX_EMAILS` (50) and `TRIAGE_LABEL` (`non-actionable`). More accounts can be added by hand as `GMAIL_ACCOUNT_1` and `GMAIL_PASSWORD_1`, and so on. Runs are saved in `~/.config/mail-triage/runs` for 90 days, and what you marked Done in `done/mail.json` for a month.
+Settings are in `~/.config/mail-triage/config` (only readable by you): `MAX_EMAILS` (50) and `TRIAGE_LABEL` (`non-actionable`), and the apps Add account sets: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_APP_ID`, `MICROSOFT_TENANT` and `MICROSOFT_REDIRECT`. A Gmail and app password from an earlier version's settings (`GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`) moves to your accounts the first time Mail runs. More accounts can be added by hand as `GMAIL_ACCOUNT_1` and `GMAIL_PASSWORD_1`, and so on. Runs are saved in `~/.config/mail-triage/runs` for 90 days, and what you marked Done in `done/mail.json` for a month.

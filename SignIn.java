@@ -33,6 +33,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -56,7 +57,7 @@ import java.util.regex.Pattern;
  * again in the background to listen.</li>
  * </ul>
  *
- * Either needs an app of yours that Google or Microsoft knows (its ID in Mail's settings), and a work account's admin
+ * Either needs an app of yours that Google or Microsoft knows (its ID, which Add account asks for), and a work account's admin
  * may have to allow it. Sign-ins are kept in {@link #FILE}, readable only by you, never in a folder the tab reads.
  */
 public class SignIn {
@@ -104,7 +105,124 @@ public class SignIn {
             if (a.path("kind").asText().equals("microsoft")) out.add(Config.Account.microsoft(e.getKey(), a.path("login").asText(e.getKey())));
             else if (a.path("kind").asText().equals("graph")) out.add(Config.Account.graph(e.getKey(), a.path("login").asText(e.getKey())));
             else if (a.path("kind").asText().equals("google")) out.add(Config.Account.google(e.getKey()));
+            else if (a.path("kind").asText().equals("gmail")) out.add(Config.Account.gmail(e.getKey(), a.path("password").asText("")));
         });
+        return out;
+    }
+
+    // ---- Add account: a Gmail with an app password, the apps signing in needs, and each account's colour ----
+
+    static final Pattern APP_PASSWORD = Pattern.compile("[a-zA-Z]{4}( ?[a-zA-Z]{4}){3}");
+    static final Pattern COLOUR = Pattern.compile("#[0-9a-fA-F]{6}");
+
+    /** Adds a Gmail with an app password, once Gmail took it: answers {added}. */
+    static ObjectNode addGmail(String address, String password) throws IOException {
+        String email = address.strip().toLowerCase(Locale.ROOT), pass = password.replace(" ", "").strip();
+        if (!ACCOUNT.matcher(email).matches()) throw new IllegalArgumentException("That isn't an email address.");
+        if (!APP_PASSWORD.matcher(pass).matches()) {
+            throw new IllegalArgumentException("An app password is 16 letters, from myaccount.google.com/apppasswords. Your own password won't do.");
+        }
+        try (var store = Mailbox.store(Config.Account.gmail(email, pass))) {
+            // Signed in: Gmail took it.
+        } catch (jakarta.mail.AuthenticationFailedException e) {
+            throw new IllegalArgumentException("Gmail didn't take that app password for " + email + ". Check both, or make a new app password.");
+        } catch (Exception e) {
+            throw new IOException("couldn't reach Gmail (" + clip(String.valueOf(e.getMessage()), 120) + ")");
+        }
+        update(s -> s.withObject("/accounts").putObject(email).put("kind", "gmail").put("password", pass).put("at", Instant.now().toString()));
+        return JSON.createObjectNode().put("added", email);
+    }
+
+    /** Sets an account's colour, for its emails on the Mail tab. */
+    static ObjectNode setColour(String account, String colour) throws IOException {
+        String email = account.strip().toLowerCase(Locale.ROOT);
+        if (!COLOUR.matcher(colour).matches()) throw new IllegalArgumentException("That isn't a colour.");
+        boolean[] had = { false };
+        update(s -> {
+            if (s.path("accounts").has(email)) {
+                had[0] = true;
+                ((ObjectNode) s.get("accounts").get(email)).put("colour", colour.toLowerCase(Locale.ROOT));
+            }
+        });
+        if (!had[0]) throw new IllegalArgumentException("That isn't one of Mail's accounts.");
+        return JSON.createObjectNode();
+    }
+
+    static String colour(String email) {
+        String c = read().path("accounts").path(email.toLowerCase(Locale.ROOT)).path("colour").asText("");
+        return COLOUR.matcher(c).matches() ? c : "";
+    }
+
+    /** The Microsoft app and Google client signing in uses: {microsoft: {app, tenant, redirect}, google: {app, secret}}. */
+    static ObjectNode apps(Map<String, String> raw) {
+        ObjectNode out = JSON.createObjectNode();
+        out.putObject("microsoft").put("app", raw.getOrDefault("MICROSOFT_APP_ID", "").strip())
+                .put("tenant", raw.getOrDefault("MICROSOFT_TENANT", "").strip()).put("redirect", raw.getOrDefault("MICROSOFT_REDIRECT", "").strip());
+        out.putObject("google").put("app", raw.getOrDefault("GOOGLE_CLIENT_ID", "").strip())
+                .put("secret", !raw.getOrDefault("GOOGLE_CLIENT_SECRET", "").isBlank());
+        return out;
+    }
+
+    /** Sets the Microsoft app, from Add account: its ID, and for an organisation's own app its organisation and return address. */
+    static void setMicrosoftApp(String id, String tenant, String redirect) throws IOException {
+        id = id.strip();
+        tenant = tenant.strip();
+        redirect = redirect.strip();
+        if (!APP_ID.matcher(id).matches()) throw new IllegalArgumentException("The app ID is its Application (client) ID, like 1a2b3c4d-1a2b-1a2b-1a2b-1a2b3c4d5e6f.");
+        if (!tenant.isEmpty() && !TENANT.matcher(tenant).matches()) throw new IllegalArgumentException("The organisation is its Directory (tenant) ID or its domain, like contoso.com.");
+        if (!redirect.isEmpty() && !REDIRECT.matcher(redirect).matches()) {
+            throw new IllegalArgumentException("The return address is the app's redirect URI, like https://login.microsoftonline.com/common/oauth2/nativeclient.");
+        }
+        Config.set(Map.of("MICROSOFT_APP_ID", id, "MICROSOFT_TENANT", tenant, "MICROSOFT_REDIRECT", redirect));
+    }
+
+    /** Sets the Google client, from Add account. An empty secret keeps the one set, for the same client. */
+    static void setGoogleApp(Map<String, String> raw, String id, String secret) throws IOException {
+        id = id.strip();
+        secret = secret.strip();
+        if (!GOOGLE_ID.matcher(id).matches()) {
+            throw new IllegalArgumentException("The client ID is the one Google Cloud shows for a Desktop app, ending .apps.googleusercontent.com.");
+        }
+        if (secret.isEmpty()) {
+            if (!id.equals(raw.getOrDefault("GOOGLE_CLIENT_ID", "").strip()) || raw.getOrDefault("GOOGLE_CLIENT_SECRET", "").isBlank()) {
+                throw new IllegalArgumentException("Give the client secret Google Cloud shows with that client ID too.");
+            }
+            Config.set(Map.of("GOOGLE_CLIENT_ID", id));
+            return;
+        }
+        if (!secret.matches("[\\x21-\\x7E]{8,100}")) throw new IllegalArgumentException("That isn't a client secret: copy it from Google Cloud's Credentials page.");
+        Config.set(Map.of("GOOGLE_CLIENT_ID", id, "GOOGLE_CLIENT_SECRET", secret));
+    }
+
+    /**
+     * The organisation's own app each Evolution account on this machine signs in to Microsoft with (OverrideOauth2 in
+     * its account file), so Add account can offer it. An empty return address there is Microsoft's nativeclient page.
+     */
+    static ArrayNode evolutionApps() {
+        ArrayNode out = JSON.createArrayNode();
+        Set<String> seen = new java.util.HashSet<>();
+        Path home = Path.of(System.getProperty("user.home"));
+        for (Path sources : List.of(home.resolve(".config/evolution/sources"), home.resolve(".var/app/org.gnome.Evolution/config/evolution/sources"))) {
+            if (!Files.isDirectory(sources)) continue;
+            try (var files = Files.list(sources)) {
+                for (Path f : files.filter(f -> f.getFileName().toString().endsWith(".source")).toList()) {
+                    Map<String, String> keys = new HashMap<>();
+                    for (String line : Files.readAllLines(f, StandardCharsets.UTF_8)) {
+                        int eq = line.indexOf('=');
+                        if (eq > 0 && !line.startsWith("#")) keys.putIfAbsent(line.substring(0, eq).strip(), line.substring(eq + 1).strip());
+                    }
+                    if (!"true".equals(keys.get("OverrideOauth2"))) continue;
+                    String app = keys.getOrDefault("Oauth2ClientId", ""), tenant = keys.getOrDefault("Oauth2Tenant", "");
+                    String redirect = keys.getOrDefault("Oauth2RedirectUri", "");
+                    if (redirect.isEmpty()) redirect = "https://login.microsoftonline.com/common/oauth2/nativeclient";
+                    if (!APP_ID.matcher(app).matches() || !(tenant.isEmpty() || TENANT.matcher(tenant).matches()) || !REDIRECT.matcher(redirect).matches()) continue;
+                    if (seen.add(app + " " + tenant + " " + redirect)) {
+                        out.addObject().put("app", app).put("tenant", tenant).put("redirect", redirect).put("account", clip(keys.getOrDefault("DisplayName", ""), 100));
+                    }
+                }
+            } catch (IOException ignored) {
+            }
+        }
         return out;
     }
 
@@ -128,7 +246,7 @@ public class SignIn {
         String who = microsoft ? "Microsoft" : "Google";
         JsonNode kept = read().path("accounts").path(a.email());
         String refresh = kept.path("refreshToken").asText("");
-        if (refresh.isEmpty()) throw new IOException("Mail isn't signed in to " + a.email() + ". Sign in to " + who + " in Mail's settings.");
+        if (refresh.isEmpty()) throw new IOException("Mail isn't signed in to " + a.email() + ". Add it again in Mail's settings.");
         Map<String, String> raw = Config.load().raw;
         // At the organisation it signed in at, which may since have changed in the settings.
         JsonNode r = microsoft
@@ -138,7 +256,7 @@ public class SignIn {
                         "refresh_token", refresh));
         if (!r.hasNonNull("access_token")) {
             throw new IOException(r.path("error").asText("").equals("invalid_grant")
-                    ? "Mail's sign-in to " + a.email() + " ran out or was taken back. Sign in to " + who + " again in Mail's settings."
+                    ? "Mail's sign-in to " + a.email() + " ran out or was taken back. Remove it in Mail's settings and add it again."
                     : who + " wouldn't let Mail in to " + a.email() + ": " + error(r));
         }
         String next = r.path("refresh_token").asText("");
@@ -156,7 +274,7 @@ public class SignIn {
     static String appId(Map<String, String> raw) {
         String id = raw.getOrDefault("MICROSOFT_APP_ID", "").strip();
         if (!APP_ID.matcher(id).matches()) {
-            throw new IllegalArgumentException("Signing in to Microsoft needs an app ID. Set Microsoft app ID in Mail's settings: its README says how to get one.");
+            throw new IllegalArgumentException("Signing in to Microsoft needs an app ID. Add account, Microsoft asks for it, and Mail's README says how to get one.");
         }
         return id;
     }
@@ -166,7 +284,7 @@ public class SignIn {
         String t = raw.getOrDefault("MICROSOFT_TENANT", "").strip();
         if (t.isEmpty()) return "common";
         if (!TENANT.matcher(t).matches()) {
-            throw new IllegalArgumentException("Microsoft organisation in Mail's settings should be its Directory (tenant) ID or its domain, like contoso.com.");
+            throw new IllegalArgumentException("The app's organisation should be its Directory (tenant) ID or its domain, like contoso.com. Change it with Add account, Microsoft, Change app.");
         }
         return t;
     }
@@ -180,7 +298,7 @@ public class SignIn {
         String r = raw.getOrDefault("MICROSOFT_REDIRECT", "").strip();
         if (r.isEmpty()) return null;
         if (!REDIRECT.matcher(r).matches()) {
-            throw new IllegalArgumentException("Microsoft return address in Mail's settings should be the app's redirect URI, like https://login.microsoftonline.com/common/oauth2/nativeclient.");
+            throw new IllegalArgumentException("The app's return address should be its redirect URI, like https://login.microsoftonline.com/common/oauth2/nativeclient.");
         }
         return r;
     }
@@ -305,14 +423,14 @@ public class SignIn {
     static String googleId(Map<String, String> raw) {
         String id = raw.getOrDefault("GOOGLE_CLIENT_ID", "").strip();
         if (!GOOGLE_ID.matcher(id).matches()) {
-            throw new IllegalArgumentException("Signing in to Google needs a client ID, like 1234-abc….apps.googleusercontent.com. Set Google client ID in Mail's settings: its README says how to get one.");
+            throw new IllegalArgumentException("Signing in to Google needs a client ID, like 1234-abc….apps.googleusercontent.com. Add account, Google asks for it, and Mail's README says how to make one.");
         }
         return id;
     }
 
     static String googleSecret(Map<String, String> raw) {
         String secret = raw.getOrDefault("GOOGLE_CLIENT_SECRET", "").strip();
-        if (secret.isEmpty()) throw new IllegalArgumentException("Signing in to Google needs the client secret that goes with its client ID. Set Google client secret in Mail's settings.");
+        if (secret.isEmpty()) throw new IllegalArgumentException("Signing in to Google needs the client secret that goes with its client ID. Add account, Google, Change client.");
         return secret;
     }
 
@@ -506,11 +624,11 @@ public class SignIn {
             return "your organisation has to allow Mail's app first. Send your admin its app ID and ask them to allow it.";
         }
         if (d.contains("AADSTS7000218")) {
-            return "that app won't take a sign-in code. Turn on Allow public client flows in its Authentication settings, or set its redirect URI as Microsoft return address in Mail's settings.";
+            return "that app won't take a sign-in code. Turn on Allow public client flows in its Authentication settings, or give its redirect URI as the return address: Add account, Microsoft, Change app.";
         }
-        if (d.contains("AADSTS50011")) return "the app doesn't know that return address. Check Microsoft return address in Mail's settings.";
-        if (d.contains("AADSTS700016") || d.contains("AADSTS700038")) return "Microsoft doesn't know that app ID. Check Microsoft app ID in Mail's settings.";
-        if (d.contains("The OAuth client was not found") || d.contains("invalid_client")) return "Google doesn't know that client. Check Google client ID and secret in Mail's settings.";
+        if (d.contains("AADSTS50011")) return "the app doesn't know that return address. Check the return address: Add account, Microsoft, Change app.";
+        if (d.contains("AADSTS700016") || d.contains("AADSTS700038")) return "Microsoft doesn't know that app ID. Check the app ID: Add account, Microsoft, Change app.";
+        if (d.contains("The OAuth client was not found") || d.contains("invalid_client")) return "Google doesn't know that client. Check its client ID and secret: Add account, Google, Change client.";
         d = d.lines().findFirst().orElse(d);
         int trace = d.indexOf(" Trace ID:"); // Microsoft's own references, for its support, not for you
         return clip(trace > 0 ? d.substring(0, trace) : d, 300);
@@ -561,11 +679,12 @@ public class SignIn {
         return s.length() <= max ? s : s.substring(0, max) + "…";
     }
 
-    /** The accounts list for the Settings pop-up: [{email, kind, how}], app passwords first. */
+    /** The accounts list for the Settings pop-up: [{email, kind, where, colour}], app passwords first. */
     static ArrayNode list(Config cfg) {
         ArrayNode out = JSON.createArrayNode();
         for (Config.Account a : cfg.getAccounts()) {
-            out.addObject().put("email", a.email()).put("kind", a.kind().name().toLowerCase(Locale.ROOT)).put("where", a.where());
+            out.addObject().put("email", a.email()).put("kind", a.kind().name().toLowerCase(Locale.ROOT)).put("where", a.where())
+                    .put("colour", colour(a.email()));
         }
         return out;
     }

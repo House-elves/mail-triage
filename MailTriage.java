@@ -47,7 +47,7 @@ import java.util.stream.Stream;
  * at Gmail labelled), the rest stays unread and is saved with the reason, for its Mail tab on Elf Desk. Sends nothing
  * but the replies you send from the tab.
  */
-@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.7.0",
+@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.8.0",
         description = "Sorts your unread mail with Claude, for Elf Desk's Mail tab")
 public class MailTriage implements Callable<Integer> {
 
@@ -89,7 +89,7 @@ public class MailTriage implements Callable<Integer> {
 
         List<Config.Account> accounts = config.getAccounts();
         if (accounts.isEmpty()) {
-            System.err.println("No account set up: set Gmail account and Gmail app password in Mail's settings, or sign in to Google or Microsoft there.");
+            System.err.println("No account set up yet: Add account in Mail's settings.");
             return 1;
         }
         List<Map<String, Object>> triageAccounts = new ArrayList<>();
@@ -100,6 +100,8 @@ public class MailTriage implements Callable<Integer> {
             Map<String, Object> accountData = new LinkedHashMap<>();
             accountData.put("email", account.email());
             accountData.put("where", account.where());
+            String colour = SignIn.colour(account.email());
+            if (!colour.isEmpty()) accountData.put("colour", colour);
             if (result.error() != null) accountData.put("error", result.error());
             accountData.put("processed", result.results().size());
             accountData.put("markedRead", result.results().stream().filter(r -> "MARK_READ".equals(r.decision())).count());
@@ -111,6 +113,7 @@ public class MailTriage implements Callable<Integer> {
                 d.put("from", r.from());
                 d.put("decision", r.decision());
                 d.put("reason", r.reason());
+                if (!r.summary().isBlank()) d.put("summary", r.summary());
                 d.put("messageId", r.messageId());
                 decisions.add(d);
             }
@@ -141,7 +144,8 @@ public class MailTriage implements Callable<Integer> {
     /** --action done: the Mail tab's Done, its values on stdin (the runner checked them against elf.yaml). */
     private int action(Config config) {
         if (action.equals("learn-style") || action.equals("save-style")) return style(config);
-        if (List.of("accounts", "microsoft-sign-in", "microsoft-check", "microsoft-finish", "google-sign-in", "google-check", "sign-out").contains(action)) {
+        if (List.of("accounts", "microsoft-sign-in", "microsoft-check", "microsoft-finish", "google-sign-in", "google-check", "sign-out",
+                "add-gmail", "set-colour", "microsoft-app", "google-app", "microsoft-evolution").contains(action)) {
             return signIn(config);
         }
         if (!List.of("done", "draft-reply", "send-reply", "find-out").contains(action)) {
@@ -183,13 +187,29 @@ public class MailTriage implements Callable<Integer> {
      */
     private int signIn(Config config) {
         try {
-            JsonNode in = action.equals("sign-out") || action.equals("microsoft-finish") ? JSON.readTree(System.in) : JSON.createObjectNode();
+            JsonNode in = List.of("sign-out", "microsoft-finish", "add-gmail", "set-colour", "microsoft-app", "google-app").contains(action)
+                    ? JSON.readTree(System.in) : JSON.createObjectNode();
             ObjectNode out = switch (action) {
                 case "microsoft-sign-in" -> SignIn.microsoftStart(config);
                 case "microsoft-check" -> SignIn.microsoftCheck(config);
                 case "microsoft-finish" -> SignIn.microsoftFinish(config, in.path("address").asText(""));
                 case "google-sign-in" -> SignIn.googleStart(config);
                 case "google-check" -> SignIn.googleCheck();
+                case "add-gmail" -> SignIn.addGmail(in.path("email").asText(""), in.path("password").asText(""));
+                case "set-colour" -> SignIn.setColour(in.path("account").asText(""), in.path("colour").asText(""));
+                case "microsoft-app" -> {
+                    SignIn.setMicrosoftApp(in.path("app").asText(""), in.path("tenant").asText(""), in.path("redirect").asText(""));
+                    yield JSON.createObjectNode();
+                }
+                case "google-app" -> {
+                    SignIn.setGoogleApp(config.raw, in.path("app").asText(""), in.path("secret").asText(""));
+                    yield JSON.createObjectNode();
+                }
+                case "microsoft-evolution" -> {
+                    ObjectNode o = JSON.createObjectNode();
+                    o.set("evolution", SignIn.evolutionApps());
+                    yield o;
+                }
                 case "sign-out" -> {
                     String account = in.path("account").asText("").toLowerCase(java.util.Locale.ROOT);
                     if (!SignIn.forget(account)) throw new IllegalArgumentException("Mail isn't signed in to " + account);
@@ -198,6 +218,8 @@ public class MailTriage implements Callable<Integer> {
                 default -> JSON.createObjectNode();
             };
             out.set("accounts", SignIn.list(config));
+            // The apps signing in uses, as they are now, so Add account asks for one only when it isn't set.
+            out.set("apps", SignIn.apps(Config.load().raw));
             System.out.println(JSON.writeValueAsString(out));
             return 0;
         } catch (IllegalArgumentException e) {

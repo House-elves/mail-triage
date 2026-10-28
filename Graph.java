@@ -52,7 +52,7 @@ public class Graph {
             String body = m.path("body").path("content").asText("");
             emails.add(0, new EmailTriage.EmailInfo(m.path("id").asText(), address(m.path("from")), addresses(m.path("toRecipients")),
                     addresses(m.path("ccRecipients")), m.path("subject").asText(""), m.path("receivedDateTime").asText(""),
-                    h.getOrDefault("list-id", ""), body.length() > 800 ? body.substring(0, 800) + "..." : body,
+                    h.getOrDefault("list-id", ""), body.length() > 2000 ? body.substring(0, 2000) + "..." : body,
                     m.path("internetMessageId").asText(""), h.getOrDefault("in-reply-to", ""), h.getOrDefault("references", ""),
                     m.path("conversationId").asText("")));
         }
@@ -198,7 +198,7 @@ public class Graph {
                 SignIn.TOKENS.remove(a.email());
                 continue;
             }
-            if (status == 401) throw new IOException("Microsoft wouldn't let Mail in to " + a.email() + ". Sign in to Microsoft again in Mail's settings.");
+            if (status == 401) throw new IOException("Microsoft wouldn't let Mail in to " + a.email() + ". Remove it in Mail's settings and add it again.");
             if (status >= 400) {
                 String said;
                 try {

@@ -35,10 +35,15 @@ public class EmailTriage {
         String conversation
     ) {}
 
-    record Decision(String decision, String reason) {}
+    /** @param summary for one that needs you: what it's about and where it stands, in a sentence or two, as Zulip's digests */
+    record Decision(String decision, String reason, String summary) {
+        Decision(String decision, String reason) {
+            this(decision, reason, "");
+        }
+    }
 
     /** @param messageId the Message-ID header, so a reader can find the email (Gmail: rfc822msgid:) */
-    record TriageResult(String subject, String from, String decision, String reason, String messageId) {}
+    record TriageResult(String subject, String from, String decision, String reason, String summary, String messageId) {}
 
     // ── Fetch unread emails via IMAP ──
 
@@ -76,8 +81,8 @@ public class EmailTriage {
                         String references = safeHeader(msg, "References").strip();
 
                         String body = getTextBody(msg);
-                        if (body.length() > 800) {
-                            body = body.substring(0, 800) + "...";
+                        if (body.length() > 2000) {
+                            body = body.substring(0, 2000) + "...";
                         }
 
                         emails.add(new EmailInfo(uid, from, to, cc, subject, date,
@@ -205,7 +210,10 @@ public class EmailTriage {
                 + "Respond with a JSON array where each element has:\n"
                 + "- \"index\": the email number (1-based)\n"
                 + "- \"decision\": \"KEEP_UNREAD\" or \"MARK_READ\"\n"
-                + "- \"reason\": brief explanation (under 15 words)\n\n"
+                + "- \"reason\": brief explanation (under 15 words)\n"
+                + "- \"summary\": for KEEP_UNREAD only, a one or two sentence digest of the email for the user: what it is "
+                + "about and where it stands, and say so if the sender asks the user something or wants something by a date. "
+                + "Plain text, no Markdown. Leave it empty for MARK_READ.\n\n"
                 + "Respond ONLY with the JSON array, no other text.";
 
         try {
@@ -217,7 +225,7 @@ public class EmailTriage {
                 os.flush();
             }
 
-            boolean finished = process.waitFor(2, TimeUnit.MINUTES);
+            boolean finished = process.waitFor(4, TimeUnit.MINUTES);
             if (!finished) {
                 process.destroyForcibly();
                 System.err.println("  Claude classification timed out");
@@ -248,13 +256,18 @@ public class EmailTriage {
                 int index = ((Number) d.get("index")).intValue();
                 String decision = (String) d.get("decision");
                 String reason = (String) d.getOrDefault("reason", "");
-                result.put(index, new Decision(decision, reason));
+                Object summary = d.get("summary");
+                result.put(index, new Decision(decision, reason, summary instanceof String t ? clip(t.strip(), 600) : ""));
             }
             return result;
         } catch (Exception e) {
             System.err.println("  Error classifying emails: " + e.getMessage());
             return Map.of();
         }
+    }
+
+    static String clip(String s, int max) {
+        return s.length() <= max ? s : s.substring(0, max) + "…";
     }
 
     static Map<Integer, Decision> classifyEmails(List<EmailInfo> emails, String accountEmail) {
@@ -512,7 +525,7 @@ public class EmailTriage {
                     "KEEP_UNREAD", "classification unavailable, keeping safe"));
 
             accountResults.add(new TriageResult(
-                    em.subject(), em.from(), decision.decision(), decision.reason(), em.messageId()));
+                    em.subject(), em.from(), decision.decision(), decision.reason(), decision.summary(), em.messageId()));
 
             if ("MARK_READ".equals(decision.decision())) {
                 markReadUids.add(em.uid());

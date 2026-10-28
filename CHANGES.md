@@ -3,6 +3,16 @@
 What changed for you in each version of the Mail elf, newest first. The desk shows the parts that are new when it offers you an
 update.
 
+## 1.8.0
+
+- New: each email that needs you is summed up in a sentence or two, what it's about and where it stands, as Zulip's
+  digests are. It comes from the same Claude call that sorts it.
+- New: **Add account** in Settings walks you through it: Gmail with an app password, or signing in to Google or
+  Microsoft, asking for the Google client or Microsoft app only the first time (or **Use Evolution's app**). The
+  settings list below is down to Emails per run and Label for noise.
+- New: pick each account's colour when you add it, or click its dot to change it. Its emails on the Mail tab show it.
+- The Gmail and app password from the settings moves to your accounts the first time this version runs, so you can
+  Remove it like any other.
 ## 1.7.0
 
 - Outlook at an organisation that only allows its own app, the way Evolution signs in: set **Microsoft organisation** and
