@@ -1,7 +1,7 @@
 # A House Elves elf: what Elf Desk needs to install, set up and run mail-triage.
 name: mail-triage
 title: Mail
-version: 1.9.1
+version: 1.9.2
 author: "@phillip-kruger"
 description: Sorts your unread mail with Claude, from Gmail, Google Workspace and Outlook (Office 365). Noise is marked read; what needs you is listed on its Mail tab.
 main: MailTriage.java

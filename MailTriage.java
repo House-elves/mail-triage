@@ -47,7 +47,7 @@ import java.util.stream.Stream;
  * at Gmail labelled), the rest stays unread and is saved with the reason, for its Mail tab on Elf Desk. Sends nothing
  * but the replies you send from the tab.
  */
-@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.9.1",
+@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.9.2",
         description = "Sorts your unread mail with Claude, for Elf Desk's Mail tab")
 public class MailTriage implements Callable<Integer> {
 

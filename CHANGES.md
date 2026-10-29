@@ -3,6 +3,10 @@
 What changed for you in each version of the Mail elf, newest first. The desk shows the parts that are new when it offers you an
 update.
 
+## 1.9.2
+
+- **Delete** is on the emails you marked Done too, so you can still delete one after you've dealt with it.
+
 ## 1.9.1
 
 - **Delete** moves only the email you see to the Trash, not the rest of its thread. A thread is grouped from headers

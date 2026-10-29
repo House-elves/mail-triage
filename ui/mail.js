@@ -211,7 +211,14 @@ class MailTab extends LitElement {
     }
 
     /** An email: its subject (a link to it in Gmail), who sent it, and with several accounts, which one it came to. */
-    _email(a, d, canDo, many) {
+    _deleteButton(account, d, k) {
+        return html`<button class="sm danger" ?disabled=${this._all?.of || this._deleting || this._hiding.has(k)}
+            title="Moves this email to the Trash in ${account}, after you confirm it" @click=${() => this._delete(account, d)}>
+            ${this._deleting === k ? spinner : ''}Delete</button>`;
+    }
+
+    /** canDo: Reply, Done and Delete, for what needs you; canDelete: Delete alone, for what you marked Done. */
+    _email(a, d, canDo, many, canDelete = false) {
         const account = a.email, k = key(account, d);
         const href = gmail(a, d);
         const subject = (d.subject || '(no subject)').replace(/\s+/g, ' ');
@@ -229,9 +236,8 @@ class MailTab extends LitElement {
                 <button class="sm" ?disabled=${this._all?.of || this._deleting === k}
                 title="Marks the thread read in ${account}" @click=${() => this._done(account, d)}>
                 ${this._doing === k ? spinner : ''}Done</button>
-                <button class="sm danger" ?disabled=${this._all?.of || this._deleting}
-                title="Moves this email to the Trash in ${account}, after you confirm it" @click=${() => this._delete(account, d)}>
-                ${this._deleting === k ? spinner : ''}Delete</button></span>` : ''}
+                ${this._deleteButton(account, d, k)}</span>`
+                : canDelete && d.messageId ? html`<span class="acts">${this._deleteButton(account, d, k)}</span>` : ''}
             ${this._replying === k ? html`<elf-reply class="reply"
                 .suggest=${() => elf.act('draft-reply', { account, messageId: d.messageId })}
                 .options=${[{ key: 'all', label: 'Reply all', hint: "Also to the email's other recipients, as Cc" }]}
@@ -273,7 +279,7 @@ class MailTab extends LitElement {
                         : html`<p class="empty">${doneList.length ? 'All done.' : `Nothing in ${many ? 'your inboxes' : 'your inbox'} needs you.`}</p>`}
                 </div>
                 ${doneList.length ? html`<details class="panel"><summary>Done (${doneList.length})</summary>
-                    <ul>${doneList.map(x => this._email(x.a, x.d, false, many))}</ul></details>` : ''}
+                    <ul>${doneList.map(x => this._email(x.a, x.d, false, many, true))}</ul></details>` : ''}
                 ${read.length ? html`<details class="panel"><summary>Marked read${labelled ? ' (and labelled, at Gmail)' : ''} (${read.length})</summary>
                     <ul>${read.map(x => this._email(x.a, x.d, false, many))}</ul></details>` : ''}
             </section>`;
