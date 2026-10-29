@@ -1,6 +1,6 @@
 // mail-triage's tab on Elf Desk, and its dashboard card: across your accounts (Gmail, Google Workspace, Outlook), what
 // needs you and what the triage marked read. Done marks the thread read in its account, through the desk; Delete moves
-// it to the account's Trash, once you confirm it in the desk's bar.
+// the email to the account's Trash, once you confirm it in the desk's bar.
 import {
     LitElement, html, css, shared, cardStyles, spinner, ago, runTime, took, count, isToday, settingsButton, Ticking, elf,
 } from '/elf-kit/1/kit.js';
@@ -126,7 +126,7 @@ class MailTab extends LitElement {
     }
 
     /**
-     * Delete: the desk's bar asks you first; then its account moves the thread to the Trash and it leaves the list.
+     * Delete: the desk's bar asks you first; then its account moves the email to the Trash and it leaves the list.
      * Cancel in the bar leaves it as it was.
      */
     async _delete(account, d) {
@@ -230,7 +230,7 @@ class MailTab extends LitElement {
                 title="Marks the thread read in ${account}" @click=${() => this._done(account, d)}>
                 ${this._doing === k ? spinner : ''}Done</button>
                 <button class="sm danger" ?disabled=${this._all?.of || this._deleting}
-                title="Moves the thread to the Trash in ${account}, after you confirm it" @click=${() => this._delete(account, d)}>
+                title="Moves this email to the Trash in ${account}, after you confirm it" @click=${() => this._delete(account, d)}>
                 ${this._deleting === k ? spinner : ''}Delete</button></span>` : ''}
             ${this._replying === k ? html`<elf-reply class="reply"
                 .suggest=${() => elf.act('draft-reply', { account, messageId: d.messageId })}

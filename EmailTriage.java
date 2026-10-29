@@ -412,16 +412,18 @@ public class EmailTriage {
     }
 
     /**
-     * Delete: moves the INBOX thread of this message (read and unread, as Gmail's and Outlook's own Delete do) to the
-     * account's Trash, the folder the server marks \Trash. Nothing is deleted for good: without a Trash it refuses.
+     * Delete: moves this one email (the one the tab lists) from the INBOX to the account's Trash, the folder the server
+     * marks \Trash. Only that email: a thread is grouped from headers its senders write, so another email in it could
+     * be anyone's, and a stranger's email mustn't be able to take yours to the Trash with it. Nothing is deleted for
+     * good: without a Trash it refuses.
      *
-     * @return how many messages were moved (0: it isn't in the INBOX)
+     * @return how many were moved: 1, or 0 when it isn't in the INBOX
      */
     @SuppressWarnings("unchecked")
-    static int trashThread(Config.Account account, String messageId) throws Exception {
+    static int trash(Config.Account account, String messageId) throws Exception {
         String id = messageId == null ? "" : messageId.strip().replaceAll("^<|>$", "");
         if (!MESSAGE_ID.matcher(id).matches()) throw new IllegalArgumentException("Not a Message-ID: " + messageId);
-        if (account.graph()) return Graph.trashThread(account, id);
+        if (account.graph()) return Graph.trash(account, id);
         Store store = Mailbox.store(account);
         try {
             String trash = trashFolder(store);
@@ -429,22 +431,17 @@ public class EmailTriage {
             inbox.open(Folder.READ_WRITE);
             try {
                 var imap = (org.eclipse.angus.mail.imap.IMAPFolder) inbox;
-                List<Long> all = account.gmail() ? (List<Long>) imap.doCommand(p -> {
-                    List<Long> found = uidSearch(p, "X-GM-RAW \"rfc822msgid:" + id + "\"");
-                    if (found.isEmpty()) return found;
-                    if (found.size() > 1) throw new IllegalArgumentException(SAME_ID);
-                    String thread = null;
-                    for (var r : p.command("UID FETCH " + found.get(0) + " (X-GM-THRID)", null)) {
-                        Matcher m = THRID.matcher(r.toString());
-                        if (m.find()) thread = m.group(1);
-                    }
-                    return thread == null ? found : uidSearch(p, "X-GM-THRID " + thread);
+                List<Long> found = account.gmail() ? (List<Long>) imap.doCommand(p -> {
+                    List<Long> hits = uidSearch(p, "X-GM-RAW \"rfc822msgid:" + id + "\"");
+                    if (hits.size() > 1) throw new IllegalArgumentException(SAME_ID);
+                    return hits;
                 }) : thread(imap, id, false);
-                if (all.isEmpty()) return 0;
-                Message[] msgs = imap.getMessagesByUID(all.stream().mapToLong(Long::longValue).toArray());
-                if (Arrays.asList(msgs).contains(null)) throw new IllegalStateException("The thread changed while Mail was moving it: try again");
-                imap.moveMessages(msgs, store.getFolder(trash));
-                return all.size();
+                if (found.isEmpty()) return 0;
+                // The email itself is first in its thread's list; the rest stay where they are.
+                Message email = imap.getMessageByUID(found.get(0));
+                if (email == null) throw new IllegalStateException("The email changed while Mail was moving it: try again");
+                imap.moveMessages(new Message[] { email }, store.getFolder(trash));
+                return 1;
             } finally {
                 inbox.close(false);
             }

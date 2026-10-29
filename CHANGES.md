@@ -3,11 +3,16 @@
 What changed for you in each version of the Mail elf, newest first. The desk shows the parts that are new when it offers you an
 update.
 
+## 1.9.1
+
+- **Delete** moves only the email you see to the Trash, not the rest of its thread. A thread is grouped from headers
+  anyone can write, so a stranger's email could have taken yours with it.
+
 ## 1.9.0
 
-- New: **Delete** on an email that needs you. Once you confirm it in the desk's bar, it moves the email's thread in your
-  inbox to that account's Trash (Deleted Items at Outlook), and it leaves the Mail tab. Nothing is deleted for good:
-  you can get it back from the Trash until your mail empties it.
+- New: **Delete** on an email that needs you. Once you confirm it in the desk's bar, it moves that email (only that
+  one, not the rest of its thread) to its account's Trash (Deleted Items at Outlook), and it leaves the Mail tab.
+  Nothing is deleted for good: you can get it back from the Trash until your mail empties it.
 
 ## 1.8.0
 

@@ -47,7 +47,7 @@ import java.util.stream.Stream;
  * at Gmail labelled), the rest stays unread and is saved with the reason, for its Mail tab on Elf Desk. Sends nothing
  * but the replies you send from the tab.
  */
-@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.9.0",
+@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.9.1",
         description = "Sorts your unread mail with Claude, for Elf Desk's Mail tab")
 public class MailTriage implements Callable<Integer> {
 
@@ -56,7 +56,7 @@ public class MailTriage implements Callable<Integer> {
 
     @Option(names = "--action", paramLabel = "NAME", description = "For the Mail tab: done (stdin: {account, messageId}) "
             + "marks the thread read in its account and records it in ~/.config/mail-triage/done; delete (the same) moves "
-            + "the thread to its account's Trash and records it in done/deleted.json; draft-reply ({account, "
+            + "the email to its account's Trash and records it in done/deleted.json; draft-reply ({account, "
             + "messageId}) suggests a reply; send-reply (the same, and content, all, to) sends it; find-out (the same, "
             + "content and repo) has an agent look up what the reply leaves open; accounts lists them; microsoft-sign-in and "
             + "google-sign-in start signing in, microsoft-check and google-check finish it (microsoft-finish ({address}) with a return address); sign-out ({account}) forgets one. "
@@ -170,7 +170,7 @@ public class MailTriage implements Callable<Integer> {
         if (action.equals("delete")) {
             int moved;
             try {
-                moved = EmailTriage.trashThread(account, messageId);
+                moved = EmailTriage.trash(account, messageId);
             } catch (Exception e) {
                 System.err.println("Couldn't delete it: " + e.getMessage());
                 return 1;
