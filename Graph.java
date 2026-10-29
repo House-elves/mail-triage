@@ -94,6 +94,38 @@ public class Graph {
         return ids.isEmpty() ? 0 : markRead(a, ids);
     }
 
+    /**
+     * Delete: moves the inbox thread of the email with this Message-ID (its Outlook conversation) to Deleted Items, as
+     * {@link EmailTriage#trashThread} does at IMAP. Nothing is deleted for good. Answers how many were moved, 0 when it
+     * isn't in the inbox.
+     */
+    static int trashThread(Config.Account a, String id) throws IOException, InterruptedException {
+        JsonNode m = inInbox(a, id, "id,conversationId");
+        if (m == null) return 0;
+        JsonNode r = call(a, "GET", "/me/mailFolders/inbox/messages" + query("$filter", "conversationId eq " + literal(m.path("conversationId").asText()),
+                "$select", "id", "$top", "200"), null);
+        List<String> ids = new ArrayList<>();
+        for (JsonNode x : r.path("value")) ids.add(x.path("id").asText());
+        int moved = 0;
+        for (int i = 0; i < ids.size(); i += 20) {
+            ObjectNode batch = SignIn.JSON.createObjectNode();
+            ArrayNode requests = batch.putArray("requests");
+            List<String> chunk = ids.subList(i, Math.min(i + 20, ids.size()));
+            for (int j = 0; j < chunk.size(); j++) {
+                ObjectNode req = requests.addObject().put("id", String.valueOf(j)).put("method", "POST").put("url", "/me/messages/" + enc(chunk.get(j)) + "/move");
+                req.putObject("headers").put("Content-Type", "application/json");
+                req.putObject("body").put("destinationId", "deleteditems");
+            }
+            JsonNode res = call(a, "POST", "/$batch", SignIn.JSON.writeValueAsString(batch));
+            for (JsonNode x : res.path("responses")) {
+                if (x.path("status").asInt() / 100 == 2) moved++;
+                else System.err.println("  Couldn't move one to Deleted Items: " + x.path("body").path("error").path("message").asText("HTTP " + x.path("status").asInt()));
+            }
+        }
+        if (moved < ids.size()) throw new IOException("Only " + moved + " of the thread's " + ids.size() + " emails went to Deleted Items");
+        return moved;
+    }
+
     /** The inbox email with this Message-ID (no brackets), or null; refuses two, since a sender can copy one. */
     private static JsonNode inInbox(Config.Account a, String id, String select) throws IOException, InterruptedException {
         JsonNode r = call(a, "GET", "/me/mailFolders/inbox/messages" + query("$filter", "internetMessageId eq " + literal("<" + id + ">"),

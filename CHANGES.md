@@ -3,6 +3,12 @@
 What changed for you in each version of the Mail elf, newest first. The desk shows the parts that are new when it offers you an
 update.
 
+## 1.9.0
+
+- New: **Delete** on an email that needs you. Once you confirm it in the desk's bar, it moves the email's thread in your
+  inbox to that account's Trash (Deleted Items at Outlook), and it leaves the Mail tab. Nothing is deleted for good:
+  you can get it back from the Trash until your mail empties it.
+
 ## 1.8.0
 
 - New: each email that needs you is summed up in a sentence or two, what it's about and where it stands, as Zulip's

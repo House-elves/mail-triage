@@ -1,7 +1,7 @@
 # A House Elves elf: what Elf Desk needs to install, set up and run mail-triage.
 name: mail-triage
 title: Mail
-version: 1.8.0
+version: 1.9.0
 author: "@phillip-kruger"
 description: Sorts your unread mail with Claude, from Gmail, Google Workspace and Outlook (Office 365). Noise is marked read; what needs you is listed on its Mail tab.
 main: MailTriage.java
@@ -18,6 +18,7 @@ reads:
 writes:
   - Marks the noise read, and at Gmail labels it with your noise label.
   - Marks an email's thread read when you click Done.
+  - Moves an email's thread in your inbox to its account's Trash (Deleted Items at Outlook) when you click Delete and confirm it in the desk's bar. Nothing is deleted for good: it stays in the Trash until your mail empties it.
   - Sends your reply to an email (to its sender, and with Reply all its other recipients), from the account it came to over SMTP (smtp.gmail.com or smtp.office365.com) or through Microsoft Graph, only when you click and confirm it in the desk's bar.
   - Keeps your accounts (the sign-ins you made, and a Gmail's app password) and each one's colour in ~/.config/mail-triage/signins.json, readable only by you, until you remove the account. The Google client and Microsoft app you give Add account go in its config file. Signing in to Google, it listens on this machine (127.0.0.1) for up to 5 minutes for your browser to come back from Google's page.
 
@@ -69,6 +70,13 @@ actions:
     params:
       account: {kind: email}
       # A Message-ID: printable, never starting with "-", nothing that could break the IMAP search.
+      messageId: {pattern: "<?[\\x21-\\x7E&&[^-\"\\\\<>()]][\\x21-\\x7E&&[^\"\\\\<>()]]{0,499}>?", max: 502}
+  delete:
+    label: Delete an email's thread (to its account's Trash)
+    args: [--action=delete]
+    confirm: "Delete this email from {account}? Its thread in your inbox goes to the Trash, where you can still get it back."
+    params:
+      account: {kind: email}
       messageId: {pattern: "<?[\\x21-\\x7E&&[^-\"\\\\<>()]][\\x21-\\x7E&&[^\"\\\\<>()]]{0,499}>?", max: 502}
   draft-reply:
     label: Suggest a reply to an email

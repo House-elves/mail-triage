@@ -1,9 +1,10 @@
 // mail-triage's tab on Elf Desk, and its dashboard card: across your accounts (Gmail, Google Workspace, Outlook), what
-// needs you and what the triage marked read. Done marks the thread read in its account, through the desk.
+// needs you and what the triage marked read. Done marks the thread read in its account, through the desk; Delete moves
+// it to the account's Trash, once you confirm it in the desk's bar.
 import {
     LitElement, html, css, shared, cardStyles, spinner, ago, runTime, took, count, isToday, settingsButton, Ticking, elf,
 } from '/elf-kit/1/kit.js';
-import { runs, run, done, aiThisMonth, usd } from './runs.js';
+import { runs, run, done, deleted, aiThisMonth, usd } from './runs.js';
 import './reply.js';
 import { colourOf } from './accounts.js';
 
@@ -19,11 +20,12 @@ function gmail(a, d) {
 /** Which email, in which account: the same email can reach two of yours. */
 const key = (account, d) => `${account}\n${d.messageId}`;
 
-/** The run's accounts, each decision with when you marked it Done (doneAt). */
-function withDone(data, marks) {
+/** The run's accounts, each decision with when you marked it Done (doneAt); what you deleted is left out. */
+function withDone(data, marks, gone = {}) {
     return (data?.triage?.accounts ?? []).map(a => ({
         ...a,
-        decisions: (a.decisions ?? []).map(d => ({ ...d, doneAt: marks[a.email]?.[d.messageId] ?? null })),
+        decisions: (a.decisions ?? []).filter(d => !gone[a.email]?.[d.messageId])
+            .map(d => ({ ...d, doneAt: marks[a.email]?.[d.messageId] ?? null })),
     }));
 }
 
@@ -38,6 +40,7 @@ class MailTab extends LitElement {
         _colours: { state: true },   // the accounts as Settings has them now, for their colours
         _picked: { state: true },
         _doing: { state: true },
+        _deleting: { state: true },  // the email whose Delete is waiting for the desk's bar or its account (key())
         _hiding: { state: true },
         _all: { state: true },
         _loading: { state: true },
@@ -118,7 +121,27 @@ class MailTab extends LitElement {
     }
 
     async _marks() {
-        this._accounts = withDone(this._run?.data, await done());
+        const [marks, gone] = await Promise.all([done(), deleted()]);
+        this._accounts = withDone(this._run?.data, marks, gone);
+    }
+
+    /**
+     * Delete: the desk's bar asks you first; then its account moves the thread to the Trash and it leaves the list.
+     * Cancel in the bar leaves it as it was.
+     */
+    async _delete(account, d) {
+        const k = key(account, d);
+        this._deleting = k;
+        this._error = null;
+        try {
+            await elf.act('delete', { account, messageId: d.messageId });
+            await this._marks();
+            if (this._replying === k) this._replying = null;
+        } catch (e) {
+            if (!e.cancelled) this._error = `${d.subject || 'That email'}: not deleted: ${e.message}`;
+        } finally {
+            this._deleting = null;
+        }
     }
 
     /** Done, or on its way there: clicked, and its account hasn't answered yet. */
@@ -203,9 +226,12 @@ class MailTab extends LitElement {
                 <button class="sm" aria-expanded=${this._replying === k ? 'true' : 'false'}
                     title="Claude suggests a reply for you to edit; nothing is sent until you click Send and confirm it"
                     @click=${() => { this._replying = this._replying === k ? null : k; }}>Reply</button>
-                <button class="sm" ?disabled=${this._all?.of}
+                <button class="sm" ?disabled=${this._all?.of || this._deleting === k}
                 title="Marks the thread read in ${account}" @click=${() => this._done(account, d)}>
-                ${this._doing === k ? spinner : ''}Done</button></span>` : ''}
+                ${this._doing === k ? spinner : ''}Done</button>
+                <button class="sm danger" ?disabled=${this._all?.of || this._deleting}
+                title="Moves the thread to the Trash in ${account}, after you confirm it" @click=${() => this._delete(account, d)}>
+                ${this._deleting === k ? spinner : ''}Delete</button></span>` : ''}
             ${this._replying === k ? html`<elf-reply class="reply"
                 .suggest=${() => elf.act('draft-reply', { account, messageId: d.messageId })}
                 .options=${[{ key: 'all', label: 'Reply all', hint: "Also to the email's other recipients, as Cc" }]}
@@ -301,7 +327,8 @@ class MailCard extends LitElement {
     async _load() {
         try {
             this._run = await run(await runs(), null);
-            this._accounts = withDone(this._run?.data, await done());
+            const [marks, gone] = await Promise.all([done(), deleted()]);
+            this._accounts = withDone(this._run?.data, marks, gone);
             this._state = await elf.state();
         } catch {
             this._run = null;

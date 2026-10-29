@@ -1,5 +1,5 @@
 // The runs mail-triage saved (~/.config/mail-triage/runs, one JSON file each), as its tab reads them through the
-// desk, and what you marked Done (~/.config/mail-triage/done/mail.json).
+// desk, what you marked Done (~/.config/mail-triage/done/mail.json) and what you deleted (done/deleted.json).
 import { elf, runTime } from '/elf-kit/1/kit.js';
 
 const ID = /^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})\.json$/;
@@ -49,6 +49,15 @@ export async function run(list, id) {
 export async function done() {
     try {
         return (await elf.readJson('done', 'mail.json')) ?? {};
+    } catch {
+        return {};
+    }
+}
+
+/** What you deleted (moved to its account's Trash): {account: {Message-ID: when}}. */
+export async function deleted() {
+    try {
+        return (await elf.readJson('done', 'deleted.json')) ?? {};
     } catch {
         return {};
     }

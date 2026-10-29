@@ -4,7 +4,7 @@
 
 A House Elf that sorts your unread mail with [Claude Code](https://claude.com/claude-code), for its **Mail** tab on [Elf Desk](https://github.com/House-elves/elf-desk). It reads Gmail, Google Workspace and Outlook (Office 365), as many accounts as you like.
 
-Each run connects to each account over IMAP, fetches the unread emails (one per thread), and asks Claude whether each needs you. Noise is marked read, and at Gmail labelled with your noise label (Outlook has no labels over IMAP, so there it's only marked read). The rest stays unread and is listed on the Mail tab, each with a sentence or two from Claude on what it's about and where it stands (as Zulip's digests do), from the same call that sorted it: one list for all your accounts, each email in its account's colour and saying which account it came to. An account it couldn't read says why, at the top. **Done** on an email marks its thread read in its account.
+Each run connects to each account over IMAP, fetches the unread emails (one per thread), and asks Claude whether each needs you. Noise is marked read, and at Gmail labelled with your noise label (Outlook has no labels over IMAP, so there it's only marked read). The rest stays unread and is listed on the Mail tab, each with a sentence or two from Claude on what it's about and where it stands (as Zulip's digests do), from the same call that sorted it: one list for all your accounts, each email in its account's colour and saying which account it came to. An account it couldn't read says why, at the top. **Done** on an email marks its thread read in its account. **Delete** (after you confirm it in the desk's bar) moves its thread in your inbox to the account's Trash, or Deleted Items at Outlook, and takes it off the tab: never deleted for good, and with no Trash it deletes nothing.
 
 **Reply** on an email asks Claude for a suggested reply, from the email and the part of its thread everyone you'd reply to already saw. You edit it, tick **Reply all** if it should also go to the email's other recipients, and **Send** sends it from the account the email came to (SMTP, signed in the same way) in the same thread, quoting the email, once you confirm it in the desk's bar. Who it goes to always comes from the email itself. Nothing else is ever sent.
 
@@ -60,7 +60,7 @@ Using an app your organisation registered for another program is between you and
 
 In Elf Desk, the **+** after the last tab: **Add** it, which adds the Mail tab. Then add your accounts in its Settings (see above). Once one is set up it sorts your inbox for the first time. After that it runs when you click **Refresh** (or the dashboard's **Refresh everything**) and on weekdays at 07:00, which you can change in its settings.
 
-The desk reads [`elf.yaml`](elf.yaml): its settings, commands, tab and the actions its tab may ask for (Done, a suggested reply, and Send, which asks you first).
+The desk reads [`elf.yaml`](elf.yaml): its settings, commands, tab and the actions its tab may ask for (Done, Delete and Send, which ask you first, and a suggested reply).
 
 ## Prerequisites
 
@@ -84,4 +84,4 @@ echo '{}' | jbang MailTriage.java --action=google-check        # once you're bac
 echo '{"account":"you@example.com"}' | jbang MailTriage.java --action=sign-out
 ```
 
-Settings are in `~/.config/mail-triage/config` (only readable by you): `MAX_EMAILS` (50) and `TRIAGE_LABEL` (`non-actionable`), and the apps Add account sets: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_APP_ID`, `MICROSOFT_TENANT` and `MICROSOFT_REDIRECT`. A Gmail and app password from an earlier version's settings (`GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`) moves to your accounts the first time Mail runs. More accounts can be added by hand as `GMAIL_ACCOUNT_1` and `GMAIL_PASSWORD_1`, and so on. Runs are saved in `~/.config/mail-triage/runs` for 90 days, and what you marked Done in `done/mail.json` for a month.
+Settings are in `~/.config/mail-triage/config` (only readable by you): `MAX_EMAILS` (50) and `TRIAGE_LABEL` (`non-actionable`), and the apps Add account sets: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_APP_ID`, `MICROSOFT_TENANT` and `MICROSOFT_REDIRECT`. A Gmail and app password from an earlier version's settings (`GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`) moves to your accounts the first time Mail runs. More accounts can be added by hand as `GMAIL_ACCOUNT_1` and `GMAIL_PASSWORD_1`, and so on. Runs are saved in `~/.config/mail-triage/runs` for 90 days, what you marked Done in `done/mail.json` and what you deleted in `done/deleted.json`, for a month.

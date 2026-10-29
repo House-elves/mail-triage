@@ -47,7 +47,7 @@ import java.util.stream.Stream;
  * at Gmail labelled), the rest stays unread and is saved with the reason, for its Mail tab on Elf Desk. Sends nothing
  * but the replies you send from the tab.
  */
-@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.8.0",
+@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.9.0",
         description = "Sorts your unread mail with Claude, for Elf Desk's Mail tab")
 public class MailTriage implements Callable<Integer> {
 
@@ -55,7 +55,8 @@ public class MailTriage implements Callable<Integer> {
     boolean dryRun;
 
     @Option(names = "--action", paramLabel = "NAME", description = "For the Mail tab: done (stdin: {account, messageId}) "
-            + "marks the thread read in its account and records it in ~/.config/mail-triage/done; draft-reply ({account, "
+            + "marks the thread read in its account and records it in ~/.config/mail-triage/done; delete (the same) moves "
+            + "the thread to its account's Trash and records it in done/deleted.json; draft-reply ({account, "
             + "messageId}) suggests a reply; send-reply (the same, and content, all, to) sends it; find-out (the same, "
             + "content and repo) has an agent look up what the reply leaves open; accounts lists them; microsoft-sign-in and "
             + "google-sign-in start signing in, microsoft-check and google-check finish it (microsoft-finish ({address}) with a return address); sign-out ({account}) forgets one. "
@@ -148,7 +149,7 @@ public class MailTriage implements Callable<Integer> {
                 "add-gmail", "set-colour", "microsoft-app", "google-app", "microsoft-evolution").contains(action)) {
             return signIn(config);
         }
-        if (!List.of("done", "draft-reply", "send-reply", "find-out").contains(action)) {
+        if (!List.of("done", "delete", "draft-reply", "send-reply", "find-out").contains(action)) {
             System.err.println("Not an action: " + action);
             return 2;
         }
@@ -166,6 +167,18 @@ public class MailTriage implements Callable<Integer> {
             System.err.println("Not one of Mail's accounts: " + accountName);
             return 2;
         }
+        if (action.equals("delete")) {
+            int moved;
+            try {
+                moved = EmailTriage.trashThread(account, messageId);
+            } catch (Exception e) {
+                System.err.println("Couldn't delete it: " + e.getMessage());
+                return 1;
+            }
+            if (record("deleted.json", account.email(), messageId) != 0) return 1;
+            System.out.println("{\"deleted\": " + moved + "}");
+            return 0;
+        }
         if (!action.equals("done")) return reply(account, in);
         int marked;
         try {
@@ -174,7 +187,7 @@ public class MailTriage implements Callable<Integer> {
             System.err.println("Couldn't mark it read: " + e.getMessage());
             return 1;
         }
-        if (recordDone(account.email(), messageId) != 0) return 1;
+        if (record("mail.json", account.email(), messageId) != 0) return 1;
         System.out.println("{\"marked\": " + marked + "}");
         return 0;
     }
@@ -281,9 +294,9 @@ public class MailTriage implements Callable<Integer> {
         }
     }
 
-    /** done/mail.json: {account: {Message-ID: when}}, a month of it. */
-    private static int recordDone(String account, String messageId) {
-        Path file = DONE.resolve("mail.json");
+    /** done/mail.json (Done) or done/deleted.json (Delete): {account: {Message-ID: when}}, a month of it. */
+    private static int record(String name, String account, String messageId) {
+        Path file = DONE.resolve(name);
         try {
             Files.createDirectories(DONE);
             ObjectNode all = Files.exists(file) ? (ObjectNode) JSON.readTree(file.toFile()) : JSON.createObjectNode();
@@ -292,12 +305,12 @@ public class MailTriage implements Callable<Integer> {
                 if (g.getValue() instanceof ObjectNode o) o.properties().removeIf(e -> e.getValue().asText().compareTo(monthAgo) < 0);
             });
             all.withObject(account).put(messageId, Instant.now().toString());
-            Path tmp = file.resolveSibling("mail.json.new");
+            Path tmp = file.resolveSibling(name + ".new");
             Files.writeString(tmp, JSON.writeValueAsString(all));
             Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             return 0;
         } catch (Exception e) {
-            System.err.println("Marked read, but couldn't note it as done: " + e.getMessage());
+            System.err.println((name.equals("mail.json") ? "Marked read" : "Moved to Trash") + ", but couldn't note it: " + e.getMessage());
             return 1;
         }
     }
