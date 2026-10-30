@@ -16,6 +16,8 @@ Claude reads other people's words here, so every Claude call (triage and replies
 
 Threads another elf already owns skip Claude and are marked read directly: GitHub notifications for Dependabot's `org.mvnpm` bumps on `quarkusio/quarkus`, which [mvnpm-dependabot](https://github.com/House-elves/mvnpm-dependabot) checks and comments on.
 
+**Coding agent**: it asks Claude Code by default. Under **Coding agent** in its settings you can choose Codex or [pi](https://pi.dev/) instead, or leave it to the runner's choice (runner 0.43.0 or later). Whichever it is, it gets no tools, none of your settings and an empty folder, so it can only answer with text. Find out still uses Claude Code.
+
 ## Your accounts
 
 They're listed at the top of Mail's Settings, each in a colour you pick (click its dot to change it). **Add account** asks where the mail is, then only what that one needs:
