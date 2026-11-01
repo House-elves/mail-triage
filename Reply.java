@@ -339,13 +339,12 @@ public class Reply {
             return cmd;
         }
 
-        static ObjectNode reply(String prompt) throws Exception {
-            // The reply field is sent as it is: any standing instruction about how to start an answer (a word to
-            // open with, say) is for talking to the user, not for the message they send.
-            Process p = start("--json-schema", SCHEMA, "--append-system-prompt",
-                    "The reply field is the message itself, sent exactly as written. Put nothing in it that isn't part of "
-                            + "that message: no word, name or note addressed to the user, even if other instructions ask you "
-                            + "to begin your responses with one.");
+        /**
+         * The coding agent's answer to {@code prompt}, in {@code schema}: its whole JSON (structured_output, result,
+         * total_cost_usd). {@code doing} is what it was asked to do, for the error if it doesn't answer.
+         */
+        static JsonNode ask(String prompt, String schema, String system, String doing) throws Exception {
+            Process p = start("--json-schema", schema, "--append-system-prompt", system);
             try (var os = p.getOutputStream()) {
                 os.write(prompt.getBytes(StandardCharsets.UTF_8));
             }
@@ -362,11 +361,23 @@ public class Reply {
             reader.start();
             if (!p.waitFor(3, TimeUnit.MINUTES)) {
                 p.destroyForcibly();
-                throw new IllegalStateException("The coding agent took too long to suggest a reply");
+                throw new IllegalStateException("The coding agent took too long to " + doing);
             }
             JsonNode answer = JSON.readTree(out.get(10, TimeUnit.SECONDS));
+            if (p.exitValue() != 0) {
+                throw new IllegalStateException("The coding agent couldn't " + doing + ": " + answer.path("result").asText("no answer"));
+            }
+            return answer;
+        }
+
+        static ObjectNode reply(String prompt) throws Exception {
+            // The reply field is sent as it is: any standing instruction about how to start an answer (a word to
+            // open with, say) is for talking to the user, not for the message they send.
+            JsonNode answer = ask(prompt, SCHEMA, "The reply field is the message itself, sent exactly as written. Put "
+                    + "nothing in it that isn't part of that message: no word, name or note addressed to the user, even if "
+                    + "other instructions ask you to begin your responses with one.", "suggest a reply");
             String reply = answer.path("structured_output").path("reply").asText("");
-            if (p.exitValue() != 0 || reply.isBlank()) {
+            if (reply.isBlank()) {
                 throw new IllegalStateException("The coding agent didn't suggest a reply: " + answer.path("result").asText("no answer"));
             }
             ObjectNode r = JSON.createObjectNode().put("reply", reply.strip());

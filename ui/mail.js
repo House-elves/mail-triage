@@ -17,6 +17,9 @@ function gmail(a, d) {
     return `https://mail.google.com/mail/?authuser=${encodeURIComponent(account)}#search/rfc822msgid:${encodeURIComponent(id)}`;
 }
 
+/** Look into's verdicts, as the tab says them. */
+const VERDICT = { act: 'Needs you to act', reply: 'Needs a reply', wait: 'Nothing yet', nothing: 'Nothing to do' };
+
 /** Which email, in which account: the same email can reach two of yours. */
 const key = (account, d) => `${account}\n${d.messageId}`;
 
@@ -36,6 +39,8 @@ class MailTab extends LitElement {
         _run: { state: true },
         _aiMonth: { state: true },   // what Claude cost over this month's runs, or null
         _replying: { state: true },  // the email whose reply is open (key())
+        _lookAt: { state: true },    // the email whose Look into is open (key())
+        _looks: { state: true },     // key() -> {busy, advice, error}: what the coding agent said about each email
         _accounts: { state: true },
         _colours: { state: true },   // the accounts as Settings has them now, for their colours
         _picked: { state: true },
@@ -59,7 +64,22 @@ class MailTab extends LitElement {
         li > .text { display: grid; gap: 3px; min-width: 0; }
         li + li { border-top: 1px solid var(--line); }
         li .acts { display: flex; gap: 8px; }
-        li elf-reply.reply { grid-column: 1 / -1; }
+        li elf-reply.reply, li .look { grid-column: 1 / -1; }
+        /* Look into: the coding agent's advice on an email, under it. */
+        .look { display: grid; gap: 8px; padding: 12px 16px; margin-top: 10px; border-radius: var(--r-panel);
+            border: 1px solid var(--line); background: var(--surface-2); min-width: 0; font-size: 14px; }
+        .look p { margin: 0; overflow-wrap: anywhere; }
+        .look .verdict { font-weight: 600; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
+        .look .verdict .tag { font-size: 12.5px; padding: 1px 8px; border-radius: 999px; }
+        .look .tag.act { background: var(--warn-soft); color: var(--ink); }
+        .look .tag.reply { background: var(--accent-soft); color: var(--ink); }
+        .look .tag.wait { background: var(--idle-soft); color: var(--ink); }
+        .look .tag.nothing { background: var(--ok-soft); color: var(--ink); }
+        .look ol { margin: 0; padding: 0 0 0 20px; display: grid; gap: 4px; list-style: decimal; }
+        .look ol li { display: list-item; padding: 0; border: 0; }
+        .look .why, .look .cost { color: var(--muted); font-size: 13.5px; }
+        .look .caution { padding: 8px 10px; border-radius: var(--r-control); background: var(--bad-soft); }
+        .look .acts { display: flex; flex-wrap: wrap; gap: 8px; }
         .subject { font-weight: 500; overflow-wrap: anywhere; color: var(--ink); text-decoration: none; }
         a.subject:hover { text-decoration: underline; }
         .from, .why { font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }
@@ -80,6 +100,7 @@ class MailTab extends LitElement {
         this._picked = null;
         this._loading = true;
         this._hiding = new Set();
+        this._looks = {};
         this._queue = Promise.resolve();
     }
 
@@ -137,6 +158,7 @@ class MailTab extends LitElement {
             await elf.act('delete', { account, messageId: d.messageId });
             await this._marks();
             if (this._replying === k) this._replying = null;
+            if (this._lookAt === k) this._lookAt = null;
         } catch (e) {
             if (!e.cancelled) this._error = `${d.subject || 'That email'}: not deleted: ${e.message}`;
         } finally {
@@ -210,6 +232,52 @@ class MailTab extends LitElement {
             @click=${() => { this._all = 'confirm'; }}>Done all (${n})</button></div>`;
     }
 
+    /** Look into opens (asking the coding agent the first time) or closes the advice on an email. */
+    _toggleLook(account, d) {
+        const k = key(account, d);
+        if (this._lookAt === k) {
+            this._lookAt = null;
+            return;
+        }
+        this._lookAt = k;
+        if (!this._looks[k]) this._look(account, d);
+    }
+
+    async _look(account, d) {
+        const k = key(account, d);
+        this._looks = { ...this._looks, [k]: { busy: true } };
+        try {
+            const advice = await elf.act('look-into', { account, messageId: d.messageId });
+            this._looks = { ...this._looks, [k]: { advice } };
+        } catch (e) {
+            this._looks = { ...this._looks, [k]: { error: e.message } };
+        }
+    }
+
+    /** What the coding agent said: whether you need to do anything, by when, the steps, why, and what to be careful of. */
+    _lookPanel(account, d, k) {
+        const l = this._looks[k] ?? {};
+        if (l.busy) return html`<div class="look" role="status"><p class="why">${spinner} Reading the email and its thread. This takes a little while.</p></div>`;
+        const a = l.advice;
+        const again = html`<button class="sm quiet" @click=${() => this._look(account, d)}>Look again</button>`;
+        const close = html`<button class="sm quiet" @click=${() => { this._lookAt = null; }}>Close</button>`;
+        if (!a) return html`<div class="look"><p class="error" role="alert">Couldn't look into it: ${l.error}</p>
+            <div class="acts">${again}${close}</div></div>`;
+        return html`<div class="look" role="group" aria-label="What to do about it">
+            <p class="verdict"><span class="tag ${a.verdict}">${VERDICT[a.verdict] ?? a.verdict}</span>${a.headline}</p>
+            ${a.due ? html`<p><b>By</b> ${a.due}</p>` : ''}
+            ${a.steps?.length ? html`<ol>${a.steps.map(s => html`<li>${s}</li>`)}</ol>` : ''}
+            ${a.why ? html`<p class="why">${a.why}</p>` : ''}
+            ${a.caution ? html`<p class="caution" role="note"><b>Careful:</b> ${a.caution}</p>` : ''}
+            <div class="acts">
+                ${['act', 'reply'].includes(a.verdict) && this._replying !== k ? html`<button class="sm"
+                    @click=${() => { this._replying = k; }}>Suggest a reply</button>` : ''}
+                ${again}${close}
+            </div>
+            <p class="cost">The coding agent's advice, from the email alone: check it before you act on it.${a.cost != null ? ` AI ${usd(a.cost)}.` : ''}</p>
+        </div>`;
+    }
+
     /** An email: its subject (a link to it in Gmail), who sent it, and with several accounts, which one it came to. */
     _deleteButton(account, d, k) {
         return html`<button class="sm danger" ?disabled=${this._all?.of || this._deleting || this._hiding.has(k)}
@@ -233,11 +301,15 @@ class MailTab extends LitElement {
                 <button class="sm" aria-expanded=${this._replying === k ? 'true' : 'false'}
                     title="Claude suggests a reply for you to edit; nothing is sent until you click Send and confirm it"
                     @click=${() => { this._replying = this._replying === k ? null : k; }}>Reply</button>
+                <button class="sm" aria-expanded=${this._lookAt === k ? 'true' : 'false'}
+                    title="The coding agent reads the email and its thread and says whether you need to do anything; it only advises"
+                    @click=${() => this._toggleLook(account, d)}>Look into</button>
                 <button class="sm" ?disabled=${this._all?.of || this._deleting === k}
                 title="Marks the thread read in ${account}" @click=${() => this._done(account, d)}>
                 ${this._doing === k ? spinner : ''}Done</button>
                 ${this._deleteButton(account, d, k)}</span>`
                 : canDelete && d.messageId ? html`<span class="acts">${this._deleteButton(account, d, k)}</span>` : ''}
+            ${this._lookAt === k ? this._lookPanel(account, d, k) : ''}
             ${this._replying === k ? html`<elf-reply class="reply"
                 .suggest=${() => elf.act('draft-reply', { account, messageId: d.messageId })}
                 .options=${[{ key: 'all', label: 'Reply all', hint: "Also to the email's other recipients, as Cc" }]}

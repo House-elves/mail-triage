@@ -1,7 +1,7 @@
 # A House Elves elf: what Elf Desk needs to install, set up and run mail-triage.
 name: mail-triage
 title: Mail
-version: 1.10.0
+version: 1.11.0
 author: "@phillip-kruger"
 description: Sorts your unread mail with a coding agent (Claude Code, or another you choose), from Gmail, Google Workspace and Outlook (Office 365). Noise is marked read; what needs you is listed on its Mail tab.
 main: MailTriage.java
@@ -13,7 +13,7 @@ ai: [ask]
 reads:
   - Your unread inboxes over IMAP. Gmail with an app password (imap.gmail.com). Or an account you sign in to in its Settings, as Thunderbird and Evolution do. Google, for Gmail and Google Workspace, reads at imap.gmail.com after you sign in at accounts.google.com. Microsoft, for Outlook and Office 365, reads at outlook.office365.com after you sign in at login.microsoftonline.com. An organisation's app with a return address (as Evolution signs in) reads through Microsoft Graph (graph.microsoft.com) instead, only your own mailbox.
   - Each unread email's start (the coding agent reads it, with no tools) to sort it, and for one that needs you, to sum it up in a sentence or two.
-  - An email's thread when you ask it to suggest a reply (the coding agent reads it, with no tools).
+  - An email's thread when you ask it to suggest a reply, or to look into whether you need to do anything about it (the coding agent reads it, with no tools, and only advises).
   - When you add a Microsoft account, Evolution's account settings on this machine, for the app your organisation has Evolution sign in with, so you can use it too.
   - When you click Find out, an agent (the runner's, in its sandbox, after a safety check, able only to read) reads the thread and the repo you name, to fill in what the reply leaves open.
   - The repos you maintain, from the GitHub elf's settings if it's installed, so a suggested reply can say where to look.
@@ -83,6 +83,13 @@ actions:
   draft-reply:
     label: Suggest a reply to an email
     args: [--action=draft-reply]
+    ask: false
+    params:
+      account: {kind: email}
+      messageId: {pattern: "<?[\\x21-\\x7E&&[^-\"\\\\<>()]][\\x21-\\x7E&&[^\"\\\\<>()]]{0,499}>?", max: 502}
+  look-into:
+    label: Ask the coding agent whether you need to do anything about an email
+    args: [--action=look-into]
     ask: false
     params:
       account: {kind: email}

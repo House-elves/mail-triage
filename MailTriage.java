@@ -11,6 +11,7 @@
 //SOURCES Reply.java
 //SOURCES Style.java
 //SOURCES Research.java
+//SOURCES LookInto.java
 
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -47,7 +48,7 @@ import java.util.stream.Stream;
  * at Gmail labelled), the rest stays unread and is saved with the reason, for its Mail tab on Elf Desk. Sends nothing
  * but the replies you send from the tab.
  */
-@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.10.0",
+@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.11.0",
         description = "Sorts your unread mail with Claude, for Elf Desk's Mail tab")
 public class MailTriage implements Callable<Integer> {
 
@@ -58,7 +59,8 @@ public class MailTriage implements Callable<Integer> {
             + "marks the thread read in its account and records it in ~/.config/mail-triage/done; delete (the same) moves "
             + "the email to its account's Trash and records it in done/deleted.json; draft-reply ({account, "
             + "messageId}) suggests a reply; send-reply (the same, and content, all, to) sends it; find-out (the same, "
-            + "content and repo) has an agent look up what the reply leaves open; accounts lists them; microsoft-sign-in and "
+            + "content and repo) has an agent look up what the reply leaves open; look-into ({account, messageId}) says "
+            + "whether you need to do anything about the email; accounts lists them; microsoft-sign-in and "
             + "google-sign-in start signing in, microsoft-check and google-check finish it (microsoft-finish ({address}) with a return address); sign-out ({account}) forgets one. "
             + "Prints one JSON line.")
     String action;
@@ -149,7 +151,7 @@ public class MailTriage implements Callable<Integer> {
                 "add-gmail", "set-colour", "microsoft-app", "google-app", "microsoft-evolution").contains(action)) {
             return signIn(config);
         }
-        if (!List.of("done", "delete", "draft-reply", "send-reply", "find-out").contains(action)) {
+        if (!List.of("done", "delete", "draft-reply", "send-reply", "find-out", "look-into").contains(action)) {
             System.err.println("Not an action: " + action);
             return 2;
         }
@@ -261,12 +263,16 @@ public class MailTriage implements Callable<Integer> {
         }
     }
 
-    /** draft-reply and send-reply: the email is read from its account each time, so the reply goes where the email says. */
+    /** draft-reply, look-into and send-reply: the email is read from its account each time, so the reply goes where the email says. */
     private int reply(Config.Account account, JsonNode in) {
         try {
             Reply.Email e = Reply.find(account, in.path("messageId").asText(""));
             if (action.equals("draft-reply")) {
                 System.out.println(JSON.writeValueAsString(Reply.draft(e)));
+                return 0;
+            }
+            if (action.equals("look-into")) {
+                System.out.println(JSON.writeValueAsString(LookInto.advise(e)));
                 return 0;
             }
             if (action.equals("find-out")) {
@@ -288,7 +294,8 @@ public class MailTriage implements Callable<Integer> {
             System.err.println(e.getMessage());
             return 2;
         } catch (Exception e) {
-            System.err.println((action.equals("draft-reply") ? "Couldn't suggest a reply: " : action.equals("find-out")
+            System.err.println((action.equals("draft-reply") ? "Couldn't suggest a reply: "
+                    : action.equals("look-into") ? "Couldn't look into it: " : action.equals("find-out")
                     ? "Couldn't start the agent: " : "Couldn't send it: ") + e.getMessage());
             return 1;
         }

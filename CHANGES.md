@@ -3,6 +3,13 @@
 What changed for you in each version of the Mail elf, newest first. The desk shows the parts that are new when it offers you an
 update.
 
+## 1.11.0
+
+- New: **Look into** on an email that needs you. Your coding agent reads the email and its thread, with no tools, and
+  says whether you need to do anything: act, just reply, wait, or nothing. It gives the steps, when it's due, why, and
+  anything to be careful of, such as a sign-in link or a request for money. It only advises: nothing is done or sent.
+  **Suggest a reply** opens the reply from there.
+
 ## 1.10.0
 
 - Sorting, summing up and suggesting replies ask the coding agent you choose: Claude Code, Codex or pi, under **Coding agent** in its settings (the runner's choice unless you pick one). Each is asked with no tools. It needs runner 0.43.0; with an older runner it asks Claude Code as before. Find out still uses Claude Code.
