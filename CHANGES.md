@@ -3,6 +3,11 @@
 What changed for you in each version of the Mail elf, newest first. The desk shows the parts that are new when it offers you an
 update.
 
+## 1.12.2
+
+- **Do it** no longer stops when a step is one only you can do, such as "fix the outage" or "pause the monitor". The
+  agent helps with each step and hands those back to you. It works best with runner 0.45.4.
+
 ## 1.12.1
 
 - **Do it** runs now: the runner's safety check had taken every task as a prompt injection. The steps you tick are now

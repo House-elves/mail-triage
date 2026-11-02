@@ -47,13 +47,15 @@ public class DoSteps {
         StringBuilder numbered = new StringBuilder();
         for (int i = 0; i < list.size(); i++) numbered.append(i + 1).append(". ").append(list.get(i)).append('\n');
         String today = LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.ENGLISH));
-        String prompt = "Someone asked you to carry out these steps for them, about an email they got. Today is " + today
-                + ". You can only search and read the web (WebSearch, WebFetch): you can't sign in anywhere, change "
-                + "anything, send anything or pay for anything, and you mustn't try. Do each step you can that way: check "
-                + "a site, look something up, find out what a status or an error means. A step that needs them (signing "
-                + "in, changing a setting, deciding, replying) is theirs: say so, and what they'd need to do. Don't "
-                + "guess: say what you saw, and where. Keep it brief. The steps are below, in <approved>.\n\n"
-                + "Answer with a result for each step, in order, and a summary.";
+        // Your to-do list, theirs to do, that the agent helps with: told "carry out these steps", the safety check
+        // flagged any step only you can do (fix it, change a setting) as the agent being told to act.
+        String prompt = "Someone has a to-do list, from an email they got. It's below, in <approved>, and it's theirs "
+                + "to do: your job is to help with each item by searching and reading the web (WebSearch, WebFetch), "
+                + "which is all you can do. Today is " + today + ". For each item, find out what you can that helps: "
+                + "whether a site is up, what a status or an error means, where a setting lives and how it's changed. "
+                + "Where an item needs them (signing in, changing or fixing something, deciding, replying, paying), say "
+                + "so and what they'd do; don't try it yourself. Don't guess: say what you saw, and where. Keep it "
+                + "brief.\n\nAnswer with a result for each item, in order, and a summary.";
         ObjectNode agent = Reply.JSON.createObjectNode().put("id", "do-" + System.currentTimeMillis());
         agent.putObject("checkout").put("repo", "").put("number", 0).put("kind", "WEB");
         // The steps go as approved: the runner puts them in the prompt itself, and screens them as someone's words
