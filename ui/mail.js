@@ -20,6 +20,9 @@ function gmail(a, d) {
 /** Look into's verdicts, as the tab says them. */
 const VERDICT = { act: 'Needs you to act', reply: 'Needs a reply', wait: 'Nothing yet', nothing: 'Nothing to do' };
 
+/** What Do it did with each step. */
+const DID = { done: 'Done', 'needs-you': 'Needs you', couldnt: "Couldn't" };
+
 /** Which email, in which account: the same email can reach two of yours. */
 const key = (account, d) => `${account}\n${d.messageId}`;
 
@@ -40,7 +43,7 @@ class MailTab extends LitElement {
         _aiMonth: { state: true },   // what Claude cost over this month's runs, or null
         _replying: { state: true },  // the email whose reply is open (key())
         _lookAt: { state: true },    // the email whose Look into is open (key())
-        _looks: { state: true },     // key() -> {busy, advice, error}: what the coding agent said about each email
+        _looks: { state: true },     // key() -> {busy, advice, error, steps, agent}: what the coding agent said about each email
         _accounts: { state: true },
         _colours: { state: true },   // the accounts as Settings has them now, for their colours
         _picked: { state: true },
@@ -70,16 +73,28 @@ class MailTab extends LitElement {
             border: 1px solid var(--line); background: var(--surface-2); min-width: 0; font-size: 14px; }
         .look p { margin: 0; overflow-wrap: anywhere; }
         .look .verdict { font-weight: 600; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
-        .look .verdict .tag { font-size: 12.5px; padding: 1px 8px; border-radius: 999px; }
+        .look .tag { font-size: 12.5px; padding: 1px 8px; border-radius: 999px; }
         .look .tag.act { background: var(--warn-soft); color: var(--ink); }
         .look .tag.reply { background: var(--accent-soft); color: var(--ink); }
         .look .tag.wait { background: var(--idle-soft); color: var(--ink); }
         .look .tag.nothing { background: var(--ok-soft); color: var(--ink); }
-        .look ol { margin: 0; padding: 0 0 0 20px; display: grid; gap: 4px; list-style: decimal; }
-        .look ol li { display: list-item; padding: 0; border: 0; }
         .look .why, .look .cost { color: var(--muted); font-size: 13.5px; }
         .look .caution { padding: 8px 10px; border-radius: var(--r-control); background: var(--bad-soft); }
-        .look .acts { display: flex; flex-wrap: wrap; gap: 8px; }
+        .look .acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        .look .steps { display: grid; gap: 6px; }
+        .look .step { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 8px; align-items: center; }
+        .look .step .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+        .look .step input[type=text] { font: 14px var(--font); padding: 4px 8px; border: 1px solid transparent;
+            border-radius: var(--r-control); background: transparent; color: var(--ink); min-width: 0; }
+        .look .step input[type=text]:hover, .look .step input[type=text]:focus { border-color: var(--line); background: var(--bg); }
+        .look .step.off input[type=text] { color: var(--muted); text-decoration: line-through; }
+        .look .did { display: grid; gap: 8px; padding: 10px 12px; border-radius: var(--r-control); background: var(--bg); }
+        .look .did ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+        .look .did li { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 0; border: 0; }
+        .look .tag.done { background: var(--ok-soft); color: var(--ink); }
+        .look .tag.needs-you { background: var(--warn-soft); color: var(--ink); }
+        .look .tag.couldnt { background: var(--bad-soft); color: var(--ink); }
+        .look .src { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
         .subject { font-weight: 500; overflow-wrap: anywhere; color: var(--ink); text-decoration: none; }
         a.subject:hover { text-decoration: underline; }
         .from, .why { font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }
@@ -109,6 +124,16 @@ class MailTab extends LitElement {
         this._load();
         // Each account's colour as it is now, not as it was at the last run.
         elf.act('accounts', {}).then(r => { if (r?.accounts) this._colours = r.accounts; }).catch(() => {});
+        // Do it's agents: their reports as they change.
+        this._unwatch = elf.onChange(what => {
+            if (what !== 'agents') return;
+            for (const [k, l] of Object.entries(this._looks)) if (l.agent?.id) this._readAgent(k);
+        });
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this._unwatch?.();
     }
 
     /** An account's colour: as Settings has it, else as the run saved it, else by its place. */
@@ -248,10 +273,92 @@ class MailTab extends LitElement {
         this._looks = { ...this._looks, [k]: { busy: true } };
         try {
             const advice = await elf.act('look-into', { account, messageId: d.messageId });
-            this._looks = { ...this._looks, [k]: { advice } };
+            // Each step ticked, as written: you untick or reword them before Do it.
+            const steps = (advice.steps ?? []).map(text => ({ text, on: true }));
+            this._looks = { ...this._looks, [k]: { advice, steps } };
         } catch (e) {
             this._looks = { ...this._looks, [k]: { error: e.message } };
         }
+    }
+
+    _setLook(k, change) {
+        this._looks = { ...this._looks, [k]: { ...this._looks[k], ...change } };
+    }
+
+    /** One step's tick or words, on the steps as they are now (not as they were drawn). */
+    _setStep(k, i, change) {
+        this._setLook(k, { steps: this._looks[k].steps.map((x, j) => j === i ? { ...x, ...change } : x) });
+    }
+
+    /**
+     * The steps, each with a tick and in words you can change, and Do it: an agent does the ticked ones, as you left
+     * them, reading only the web. Then its progress, and what it found or left for you, step by step.
+     */
+    _stepsPart(k, l) {
+        const steps = l.steps ?? [];
+        if (!steps.length) return '';
+        const ag = l.agent;
+        const running = ag && ['queued', 'running'].includes(ag.status);
+        const on = steps.filter(s => s.on && s.text.trim());
+        return html`
+            <div class="steps" role="group" aria-label="Steps">
+                ${steps.map((s, i) => html`<div class="step ${s.on ? '' : 'off'}">
+                    <input type="checkbox" aria-label="Do step ${i + 1}" .checked=${s.on} ?disabled=${running}
+                        @change=${e => this._setStep(k, i, { on: e.target.checked })}>
+                    <span class="n">${i + 1}.</span>
+                    <input type="text" aria-label="Step ${i + 1}" .value=${s.text} ?disabled=${running} maxlength="400"
+                        @input=${e => this._setStep(k, i, { text: e.target.value })}>
+                </div>`)}
+            </div>
+            ${running ? html`<div class="did" role="status">
+                <p class="why">${spinner} Doing ${on.length} ${on.length === 1 ? 'step' : 'steps'} on the web. This takes a few minutes.</p>
+                <p class="src">${ag.lines?.length ? ag.lines[ag.lines.length - 1] : 'Starting…'}</p>
+                <div class="acts"><button class="sm quiet" @click=${() => elf.cancelAgent(ag.id).catch(() => {})}>Stop</button></div>
+            </div>` : ag?.status === 'done' ? this._didPart(ag)
+            : ag?.status === 'failed' ? html`<p class="error" role="alert">The agent couldn't do it: ${ag.error}</p>`
+            : ag?.status === 'cancelled' ? html`<p class="why">Stopped.</p>` : ''}
+            ${running ? '' : html`<div class="acts">
+                <button class="sm primary" ?disabled=${!on.length || l.starting}
+                    title="An agent does the ticked steps, as written here, by searching and reading the web. It never sees the email, and can't sign in, change, send or pay for anything"
+                    @click=${() => this._doSteps(k)}>${l.starting ? spinner : ''}${ag ? 'Do it again' : 'Do it'}</button>
+                <span class="src">An agent does the ticked steps by reading the web. It's given only these steps, not the email, and changes nothing.</span>
+            </div>`}`;
+    }
+
+    _didPart(ag) {
+        const o = ag.output ?? {};
+        return html`<div class="did">
+            ${o.summary ? html`<p><b>${o.summary}</b></p>` : ''}
+            <ul>${(o.results ?? []).map(r => html`<li>
+                <p><span class="tag ${r.status}">${DID[r.status] ?? r.status}</span> ${r.step}</p>
+                <p>${r.found}</p>
+                ${r.source ? html`<p class="src">${/^https?:\/\//.test(r.source)
+                    ? html`<a href=${r.source} target="_blank" rel="noopener noreferrer">${r.source}</a>` : r.source}</p>` : ''}
+            </li>`)}</ul>
+            ${o.note ? html`<p class="src">${o.note}</p>` : ''}
+            ${ag.cost != null ? html`<p class="src">AI ${usd(ag.cost)}.</p>` : ''}
+        </div>`;
+    }
+
+    async _doSteps(k) {
+        const l = this._looks[k];
+        const steps = l.steps.filter(s => s.on && s.text.trim()).map(s => s.text.trim().replace(/\s+/g, ' '));
+        this._setLook(k, { starting: true, agent: null });
+        try {
+            const r = await elf.act('do-steps', { steps: steps.join('\n') });
+            this._setLook(k, { starting: false, agent: { id: r.agent.id, status: r.agent.status, lines: [] } });
+            this._readAgent(k);
+        } catch (e) {
+            this._setLook(k, { starting: false, agent: { status: 'failed', error: e.message } });
+        }
+    }
+
+    /** The agent's report as it is now, for whichever email's steps it's doing. */
+    async _readAgent(k) {
+        const id = this._looks[k]?.agent?.id;
+        if (!id) return;
+        const a = await elf.agent(id).catch(() => null);
+        if (a && this._looks[k]?.agent?.id === id) this._setLook(k, { agent: a });
     }
 
     /** What the coding agent said: whether you need to do anything, by when, the steps, why, and what to be careful of. */
@@ -266,7 +373,7 @@ class MailTab extends LitElement {
         return html`<div class="look" role="group" aria-label="What to do about it">
             <p class="verdict"><span class="tag ${a.verdict}">${VERDICT[a.verdict] ?? a.verdict}</span>${a.headline}</p>
             ${a.due ? html`<p><b>By</b> ${a.due}</p>` : ''}
-            ${a.steps?.length ? html`<ol>${a.steps.map(s => html`<li>${s}</li>`)}</ol>` : ''}
+            ${this._stepsPart(k, l)}
             ${a.why ? html`<p class="why">${a.why}</p>` : ''}
             ${a.caution ? html`<p class="caution" role="note"><b>Careful:</b> ${a.caution}</p>` : ''}
             <div class="acts">

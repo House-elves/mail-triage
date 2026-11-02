@@ -3,6 +3,13 @@
 What changed for you in each version of the Mail elf, newest first. The desk shows the parts that are new when it offers you an
 update.
 
+## 1.12.0
+
+- New: **Do it** under Look into's steps. Untick the steps you don't want and reword any of them. An agent then does
+  the ticked ones by searching and reading the web, such as checking a site or looking up what an error means. It
+  reports each step as done (with where it found it), needs you, or couldn't. It's given only the steps, as you left
+  them, never the email, and it can't sign in, change, send or pay for anything. It needs runner 0.45.0.
+
 ## 1.11.0
 
 - New: **Look into** on an email that needs you. Your coding agent reads the email and its thread, with no tools, and

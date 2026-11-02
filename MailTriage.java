@@ -12,6 +12,7 @@
 //SOURCES Style.java
 //SOURCES Research.java
 //SOURCES LookInto.java
+//SOURCES DoSteps.java
 
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -48,7 +49,7 @@ import java.util.stream.Stream;
  * at Gmail labelled), the rest stays unread and is saved with the reason, for its Mail tab on Elf Desk. Sends nothing
  * but the replies you send from the tab.
  */
-@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.11.0",
+@Command(name = "mail-triage", mixinStandardHelpOptions = true, version = "1.12.0",
         description = "Sorts your unread mail with Claude, for Elf Desk's Mail tab")
 public class MailTriage implements Callable<Integer> {
 
@@ -60,7 +61,8 @@ public class MailTriage implements Callable<Integer> {
             + "the email to its account's Trash and records it in done/deleted.json; draft-reply ({account, "
             + "messageId}) suggests a reply; send-reply (the same, and content, all, to) sends it; find-out (the same, "
             + "content and repo) has an agent look up what the reply leaves open; look-into ({account, messageId}) says "
-            + "whether you need to do anything about the email; accounts lists them; microsoft-sign-in and "
+            + "whether you need to do anything about the email; do-steps ({steps}) has an agent do the steps you ticked, "
+            + "reading only the web; accounts lists them; microsoft-sign-in and "
             + "google-sign-in start signing in, microsoft-check and google-check finish it (microsoft-finish ({address}) with a return address); sign-out ({account}) forgets one. "
             + "Prints one JSON line.")
     String action;
@@ -151,7 +153,7 @@ public class MailTriage implements Callable<Integer> {
                 "add-gmail", "set-colour", "microsoft-app", "google-app", "microsoft-evolution").contains(action)) {
             return signIn(config);
         }
-        if (!List.of("done", "delete", "draft-reply", "send-reply", "find-out", "look-into").contains(action)) {
+        if (!List.of("done", "delete", "draft-reply", "send-reply", "find-out", "look-into", "do-steps").contains(action)) {
             System.err.println("Not an action: " + action);
             return 2;
         }
@@ -161,6 +163,19 @@ public class MailTriage implements Callable<Integer> {
         } catch (Exception e) {
             System.err.println("Can't read what to do: " + e.getMessage());
             return 2;
+        }
+        if (action.equals("do-steps")) {
+            // Only the steps you ticked go to the agent, never the email: it reads the web.
+            try {
+                System.out.println(JSON.writeValueAsString(DoSteps.request(in.path("steps").asText(""))));
+                return 0;
+            } catch (IllegalArgumentException e) {
+                System.err.println(e.getMessage());
+                return 2;
+            } catch (Exception e) {
+                System.err.println("Couldn't start the agent: " + e.getMessage());
+                return 1;
+            }
         }
         String accountName = in.path("account").asText(""), messageId = in.path("messageId").asText("");
         Config.Account account = config.getAccounts().stream()

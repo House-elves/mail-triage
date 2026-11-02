@@ -1,7 +1,7 @@
 # A House Elves elf: what Elf Desk needs to install, set up and run mail-triage.
 name: mail-triage
 title: Mail
-version: 1.11.0
+version: 1.12.0
 author: "@phillip-kruger"
 description: Sorts your unread mail with a coding agent (Claude Code, or another you choose), from Gmail, Google Workspace and Outlook (Office 365). Noise is marked read; what needs you is listed on its Mail tab.
 main: MailTriage.java
@@ -16,6 +16,7 @@ reads:
   - An email's thread when you ask it to suggest a reply, or to look into whether you need to do anything about it (the coding agent reads it, with no tools, and only advises).
   - When you add a Microsoft account, Evolution's account settings on this machine, for the app your organisation has Evolution sign in with, so you can use it too.
   - When you click Find out, an agent (the runner's, in its sandbox, after a safety check, able only to read) reads the thread and the repo you name, to fill in what the reply leaves open.
+  - When you click Do it under Look into, an agent (the runner's, in its sandbox, after a safety check) searches and reads the web to carry out the steps you ticked. It's given only those steps, as you left them, never the email. It can't sign in, change, send or pay for anything, nor reach this machine or your local network.
   - The repos you maintain, from the GitHub elf's settings if it's installed, so a suggested reply can say where to look.
 writes:
   - Marks the noise read, and at Gmail labels it with your noise label.
@@ -94,6 +95,13 @@ actions:
     params:
       account: {kind: email}
       messageId: {pattern: "<?[\\x21-\\x7E&&[^-\"\\\\<>()]][\\x21-\\x7E&&[^\"\\\\<>()]]{0,499}>?", max: 502}
+  do-steps:
+    label: Have an agent do the steps you ticked, reading only the web
+    args: [--action=do-steps]
+    ask: false
+    params:
+      # The steps you ticked, one a line, as you left them: all the agent is given.
+      steps: {pattern: "[\\s\\S]{1,4400}", max: 4400}
   send-reply:
     label: Send a reply by email
     args: [--action=send-reply]
