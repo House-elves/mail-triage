@@ -3,12 +3,18 @@
 What changed for you in each version of the Mail elf, newest first. The desk shows the parts that are new when it offers you an
 update.
 
+## 1.12.1
+
+- **Do it** runs now: the runner's safety check had taken every task as a prompt injection. The steps you tick are now
+  checked twice, as someone's words (they were written from the email) and as part of the agent's task. It needs
+  runner 0.45.2.
+
 ## 1.12.0
 
 - New: **Do it** under Look into's steps. Untick the steps you don't want and reword any of them. An agent then does
   the ticked ones by searching and reading the web, such as checking a site or looking up what an error means. It
   reports each step as done (with where it found it), needs you, or couldn't. It's given only the steps, as you left
-  them, never the email, and it can't sign in, change, send or pay for anything. It needs runner 0.45.0.
+  them, never the email, and it can't sign in, change, send or pay for anything. It needs runner 0.45.2.
 
 ## 1.11.0
 

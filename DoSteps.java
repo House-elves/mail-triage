@@ -41,8 +41,8 @@ public class DoSteps {
         if (list.isEmpty()) throw new IllegalArgumentException("Tick at least one step to do");
         if (list.size() > MAX_STEPS) throw new IllegalArgumentException("At most " + MAX_STEPS + " steps at a time");
         String version = System.getenv("ELF_RUNNER_VERSION");
-        if (version == null || older(version, "0.45.0")) {
-            throw new IllegalArgumentException("Do it needs runner 0.45.0 or later: update Elf Desk and the runner first");
+        if (version == null || older(version, "0.45.2")) {
+            throw new IllegalArgumentException("Do it needs runner 0.45.2 or later: update Elf Desk and the runner first");
         }
         StringBuilder numbered = new StringBuilder();
         for (int i = 0; i < list.size(); i++) numbered.append(i + 1).append(". ").append(list.get(i)).append('\n');
@@ -52,11 +52,13 @@ public class DoSteps {
                 + "anything, send anything or pay for anything, and you mustn't try. Do each step you can that way: check "
                 + "a site, look something up, find out what a status or an error means. A step that needs them (signing "
                 + "in, changing a setting, deciding, replying) is theirs: say so, and what they'd need to do. Don't "
-                + "guess: say what you saw, and where. Keep it brief.\n\n<steps>\n" + numbered + "</steps>\n\n"
+                + "guess: say what you saw, and where. Keep it brief. The steps are below, in <approved>.\n\n"
                 + "Answer with a result for each step, in order, and a summary.";
         ObjectNode agent = Reply.JSON.createObjectNode().put("id", "do-" + System.currentTimeMillis());
         agent.putObject("checkout").put("repo", "").put("number", 0).put("kind", "WEB");
-        agent.put("prompt", prompt).put("schema", SCHEMA).put("readOnly", true).put("web", true);
+        // The steps go as approved: the runner puts them in the prompt itself, and screens them as someone's words
+        // (they were written from an email), as well as the task as a whole.
+        agent.put("prompt", prompt).put("approved", numbered.toString()).put("schema", SCHEMA).put("readOnly", true).put("web", true);
         ObjectNode out = Reply.JSON.createObjectNode();
         out.set("agent", agent);
         return out;
