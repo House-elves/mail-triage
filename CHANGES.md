@@ -3,6 +3,11 @@
 What changed for you in each version of the Mail elf, newest first. The desk shows the parts that are new when it offers you an
 update.
 
+## 1.13.0
+
+- New: voice input. 🎤 next to your reply: say it, and the words go in at the cursor, for you to read before you send. The desk listens, with your browser's speech recognition or Whisper on its
+  machine. Needs Elf Desk 0.6.42.
+
 ## 1.12.2
 
 - **Do it** no longer stops when a step is one only you can do, such as "fix the outage" or "pause the monitor". The
